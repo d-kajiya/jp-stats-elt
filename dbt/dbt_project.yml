@@ -1,0 +1,35 @@
+# dbt プロジェクト設定
+#
+# レイヤ構成:
+#  staging      → 1:1 で raw を整形（型・カラム名・NULL処理のみ）
+#  intermediate → 複数 staging の結合・ピボット
+#  marts        → 分析利用に耐える最終形（ファクト/集計）
+
+name: 'jp_stats_elt'
+version: '1.0.0'
+config-version: 2
+
+profile: 'jp_stats_elt'
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  jp_stats_elt:
+    staging:
+      +materialized: view
+      +schema: staging
+    intermediate:
+      +materialized: view
+      +schema: intermediate
+    marts:
+      +materialized: table
+      +schema: marts

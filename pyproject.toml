@@ -1,0 +1,101 @@
+# jp-stats-elt のローカル開発依存定義
+#
+# 役割:
+#  - 本ファイルは「ローカル開発」用の依存を定義する（IDE補完・pytest・dbt parse）
+#  - 本番相当の Airflow / dbt 実行は Docker コンテナ側で行う（Dockerfile 参照）
+#  - コンテナとローカルでバージョンを揃えるため、Airflow のバージョンと
+#    Python のバージョンは Dockerfile と一致させること
+#
+# Airflow は依存ツリーが大きく単独 pin では不安定なため、
+# 公式 constraints ファイルを利用してインストールする。
+#
+# セットアップ手順は README の "Local development" セクションを参照。
+
+[project]
+name = "jp-stats-elt"
+version = "0.1.0"
+description = "ELT pipeline for Japanese government statistics (e-Stat) using Airflow + dbt + Postgres"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+license = { text = "MIT" }
+authors = [
+    { name = "Daisuke Kajiya" },
+]
+
+# ランタイム依存（コンテナ内と揃える）
+dependencies = [
+    "apache-airflow==2.9.3",
+    "apache-airflow-providers-postgres",
+    "dbt-core>=1.8,<1.9",
+    "dbt-postgres>=1.8,<1.9",
+    "great-expectations>=0.18,<0.19",
+    "requests",
+    "pandas",
+    "psycopg2-binary",
+]
+
+[project.optional-dependencies]
+# 注意: Airflow 2.9.3 の constraints が pytest や mypy のバージョンを pin しているため、
+# dev 依存はバージョン下限を厳しくしすぎないこと（constraints 側に合わせる方針）。
+dev = [
+    "pytest",
+    "pytest-cov",
+    "ruff",
+    "mypy",
+    "types-requests",
+]
+
+# このプロジェクトはアプリケーション（DAG + dbt + Docker構成）であり、
+# 配布可能な Python パッケージではない。setuptools の自動パッケージ検出を
+# 抑止して、依存定義ファイルとしてのみ pyproject.toml を機能させる。
+[tool.setuptools]
+packages = []
+
+# ===== uv =====
+# Airflow は依存ツリーが大きいため、公式 constraints を上書き制約として使う。
+# Python 3.11 / Airflow 2.9.3 の組み合わせ（Dockerfile と一致）。
+[tool.uv]
+constraint-dependencies = []
+override-dependencies = []
+
+# uv は requirements の解決時に追加の制約ファイルを読み込める。
+# `uv sync` 実行時に下記 URL の constraints を考慮させるため、
+# README の手順では `--constraint` フラグを付ける運用にする。
+
+# ===== ruff =====
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (ruff format で吸収)
+]
+
+[tool.ruff.lint.per-file-ignores]
+# DAG ファイルは Airflow の慣習で from __future__ import annotations を冒頭に置く
+"airflow/dags/*.py" = ["E402"]
+
+# ===== pytest =====
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["airflow", "scripts"]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--tb=short",
+]
+
+# ===== mypy =====
+[tool.mypy]
+python_version = "3.11"
+warn_unused_configs = true
+ignore_missing_imports = true

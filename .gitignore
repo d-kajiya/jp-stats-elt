@@ -1,0 +1,52 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+env/
+
+# ===== Environment =====
+.env
+.env.local
+*.pem
+*.key
+
+# ===== Airflow =====
+airflow/logs/
+airflow/plugins/__pycache__/
+airflow.db
+airflow.cfg
+webserver_config.py
+standalone_admin_password.txt
+
+# ===== dbt =====
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+dbt/.user.yml
+profiles.yml
+!dbt/profiles.yml
+
+# ===== IDE =====
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# ===== Data (本番では外部ストレージ) =====
+data/raw/
+data/processed/
+*.csv
+*.parquet
+!dbt/seeds/*.csv
+
+# ===== Docker =====
+.docker/
