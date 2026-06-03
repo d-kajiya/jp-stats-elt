@@ -98,7 +98,7 @@ Notes for future reference and for portfolio talking points:
 - Makefile's default shell is `/bin/sh` (dash on Ubuntu), not bash. Avoid bash-specific syntax like process substitution `<(...)`.
 - WSL2 first-time pytest startup can take 10–30 seconds due to plugin loading and file system cold cache. Subsequent runs are fast.
 - `C:\ProgramData` ownership can become broken after manual deletions, blocking Docker Desktop installation. Diagnostic: `Get-Acl C:\ProgramData | fl Owner`.
-
+- Airflow's official Docker image runs as UID 50000. On bind-mounted log directories, the host directory must be owned by 50000:0 or the container fails with PermissionError when creating per-DAG log subdirectories. Solved with make init-dirs target.
 ---
 
 **Last updated**: 2026-05-06 (Week 1-2, local environment complete)

@@ -77,3 +77,10 @@ build:
 clean:
 	rm -rf .venv .pytest_cache .ruff_cache .mypy_cache
 	find . -type d -name __pycache__ -exec rm -rf {} +
+
+init-dirs:
+	mkdir -p airflow/logs/scheduler airflow/logs/dag_processor_manager
+	sudo chown -R 50000:0 airflow/logs
+
+
+	

@@ -72,6 +72,8 @@ e-Stat REST API.
 ---
 
 ## Quick start
+For WSL2 / Linux environments: Run `make init-dirs` before the first launch. This will create `airflow/logs/` with ownership matching the UID (50000) of the Airflow container.
+
 
 ### Prerequisites
 
