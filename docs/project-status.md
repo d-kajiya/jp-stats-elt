@@ -4,12 +4,15 @@
 > README が「使い方」を、architecture.md が「設計」を語るのに対し、
 > こちらは「いつ・何を・なぜ決めたか」を時系列で残します。
 
+>This is an internal document that records the project's **progress and decision-making history**.
+>while the README covers "usage" and architecture.md details the "design,"
+>this document chronicles "what was decided, when, and why" in chronological order.
 ## Roadmap
 
 | Week | Goal | Status |
 |---|---|---|
 | 1-2 | Repository scaffold, Docker Compose, minimal DAG | **In progress** (local env done, Docker startup pending) |
-| 3-4 | e-Stat extraction + idempotent load into `raw.*` | Not started |
+| 3-4 | e-Stat extraction + idempotent load into `raw.*` | **Done** (statsDataId=0003427113, 28,800 rows/extract verified) |
 | 5-6 | dbt staging / intermediate / marts + tests | Not started |
 | 7-8 | GitHub Actions CI, architecture docs, README polish | Not started |
 
@@ -84,7 +87,10 @@ These were settled in earlier discussions and should not be re-opened without ex
 The following must be resolved before starting Week 3:
 
 1. **e-Stat API application ID**: Needs to be obtained from <https://www.e-stat.go.jp/api/>.
-2. **CPI ingestion granularity**: Recommended starting scope — national + 47 prefectures, top-10 item categories. Full item hierarchy can be added later.
+2. **CPI ingestion granularity**: Settled. statsDataId=`0003427113` (2020-base CPI).
+   Scope = tabulation: index (cdTab=1) × 10 major expense categories × nationwide + 47 prefectural capital cities (48 areas) × most recent 60 months.
+   **Important**: CPI is a city-based survey, so prefecture-level data does not exist; the area unit is the prefectural capital city.
+   Fukuoka's representative city is Fukuoka City = `40A02` (note: `40A01` is Kitakyushu City).
 3. **Time range**: Recommended starting scope — most recent 5 years (60 months). Backfill can extend later.
 
 ---
@@ -99,6 +105,9 @@ Notes for future reference and for portfolio talking points:
 - WSL2 first-time pytest startup can take 10–30 seconds due to plugin loading and file system cold cache. Subsequent runs are fast.
 - `C:\ProgramData` ownership can become broken after manual deletions, blocking Docker Desktop installation. Diagnostic: `Get-Acl C:\ProgramData | fl Owner`.
 - Airflow's official Docker image runs as UID 50000. On bind-mounted log directories, the host directory must be owned by 50000:0 or the container fails with PermissionError when creating per-DAG log subdirectories. Solved with make init-dirs target.
+- The e-Stat API sits behind a WAF (Zenedge); curl's default User-Agent is blocked. Send an identifiable User-Agent.
+- Scripts in `docker-entrypoint-initdb.d` run only on first startup with an empty data directory. Adding a table to an existing DB requires manual application (made idempotent with `CREATE TABLE IF NOT EXISTS`).
+- CPI is a city-based survey with no prefecture-level data. The area unit is nationwide + 47 prefectural capital cities. Fukuoka City = 40A02.
 ---
 
-**Last updated**: 2026-05-06 (Week 1-2, local environment complete)
+**Last updated**: 2026-06-28 (Week 3, e-Stat extraction phase complete)
