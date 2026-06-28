@@ -6,6 +6,11 @@ PostgreSQL の raw.cpi に冪等ロードする。
 """
 from __future__ import annotations
 
+import logging
+import time
+
+import requests
+
 # --- API ---
 ESTAT_BASE_URL = "https://api.e-stat.go.jp/rest/3.0/app/json"
 STATS_DATA_ID = "0003427113"  # 2020年基準消費者物価指数
@@ -48,6 +53,86 @@ AREA_CODES = [
 # 時間軸は実行時に getMetaInfo から「月次の最新60件」を取得する（ローリング窓）。
 # 月が増えても自動追従させるため、ここではハードコードしない。
 RECENT_MONTHS = 60
+
+# --- リトライ設定 ---
+MAX_RETRIES = 5
+BACKOFF_BASE = 1.0 # 秒 1-2-4-8-16と待つ
+TIMEOUT = 30.0 # 秒
+
+# 一時的エラーとみなす本文STATUS（DBアクセス系の内部エラ）
+RETRYABLE_BODY_STATUS = {200, 201, 202, 203, 299}
+
+logger = logging.getLogger(__name__)
+
+class EStatError(RuntimeError):
+    """リトライしても回復しなかった、または恒久的な API エラー。"""
+
+
+def _build_session(app_id: str) -> requests.Session:
+    session = requests.Session()
+    session.headers.update({"User-Agent": USER_AGENT})
+    session.params = {"appId": app_id}  # 全リクエスト共通で付与
+    return session
+
+
+def _get_with_retry(
+    session: requests.Session, endpoint: str, params: dict
+) -> dict:
+    """e-Stat の1エンドポイントを叩き、正常な JSON 本文(dict)を返す。
+
+    一時的エラー(HTTP 429/5xx・本文 STATUS 200番台)は指数バックオフで再試行。
+    恒久的エラー(HTTP 403・本文 STATUS 100/101/102 等)は即 EStatError。
+    """
+    url = f"{ESTAT_BASE_URL}/{endpoint}"
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        wait = BACKOFF_BASE * (2 ** (attempt - 1))
+        try:
+            resp = session.get(url, params=params, timeout=TIMEOUT)
+        except requests.RequestException as exc:
+            # ネットワーク層の例外（接続断・タイムアウト等）は一時的とみなす
+            if attempt == MAX_RETRIES:
+                raise EStatError(f"network error after {attempt} tries: {exc}") from exc
+            logger.warning("network error (try %d/%d): %s — retrying in %.0fs",
+                           attempt, MAX_RETRIES, exc, wait)
+            time.sleep(wait)
+            continue
+
+        # --- 1層目: HTTP ステータス ---
+        if resp.status_code in (429,) or 500 <= resp.status_code < 600:
+            if attempt == MAX_RETRIES:
+                raise EStatError(f"HTTP {resp.status_code} after {attempt} tries")
+            logger.warning("HTTP %d (try %d/%d) — retrying in %.0fs",
+                           resp.status_code, attempt, MAX_RETRIES, wait)
+            time.sleep(wait)
+            continue
+        if resp.status_code != 200:
+            # 403(WAF) や 400 など、再試行しても直らないもの
+            raise EStatError(f"HTTP {resp.status_code} (non-retryable): {resp.text[:200]}")
+
+        # --- 2層目: 本文 RESULT.STATUS ---
+        try:
+            body = resp.json()
+        except ValueError as exc:
+            # JSONでない（WAFのHTML等）。先頭を残して諦める
+            raise EStatError(f"non-JSON response: {resp.text[:200]}") from exc
+
+        result = next(iter(body.values())).get("RESULT", {})
+        status = result.get("STATUS")
+        if status in (0, 1, 2):
+            return body  # 正常（1=該当0件 も正常扱いで呼び出し側に委ねる）
+        if status in RETRYABLE_BODY_STATUS:
+            if attempt == MAX_RETRIES:
+                raise EStatError(f"body STATUS {status} after {attempt} tries")
+            logger.warning("body STATUS %d (try %d/%d) — retrying in %.0fs",
+                           status, attempt, MAX_RETRIES, wait)
+            time.sleep(wait)
+            continue
+        # STATUS 100(認証)/101(必須欠落)/102(値不正)/300(データ無) 等は恒久的
+        raise EStatError(f"body STATUS {status}: {result.get('ERROR_MSG')}")
+
+    raise EStatError("exhausted retries")  # 到達しない保険
+
 
 if __name__ == "__main__":
     print(f"statsDataId   : {STATS_DATA_ID}")
