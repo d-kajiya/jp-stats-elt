@@ -7,9 +7,14 @@ PostgreSQL の raw.cpi に冪等ロードする。
 from __future__ import annotations
 
 import logging
+import os
 import time
 
+import pandas as pd
+import psycopg2
 import requests
+from psycopg2.extras import execute_values
+
 
 # --- API ---
 ESTAT_BASE_URL = "https://api.e-stat.go.jp/rest/3.0/app/json"
@@ -134,8 +139,177 @@ def _get_with_retry(
     raise EStatError("exhausted retries")  # 到達しない保険
 
 
+def fetch_recent_month_codes(
+    session: requests.Session, n: int = RECENT_MONTHS
+) -> list[str]:
+    """getMetaInfo から月次の時間軸コードを取得し、新しい順で上位 n 件を返す。
+
+    月は毎月増えるため実行時に取り直す（ローリング窓）。
+    """
+    body = _get_with_retry(session, "getMetaInfo", {"statsDataId": STATS_DATA_ID})
+    class_objs = body["GET_META_INFO"]["METADATA_INF"]["CLASS_INF"]["CLASS_OBJ"]
+    if isinstance(class_objs, dict):
+        class_objs = [class_objs]
+
+    time_obj = next(o for o in class_objs if o["@id"] == "time")
+    classes = time_obj["CLASS"]
+    if isinstance(classes, dict):
+        classes = [classes]
+
+    # 名称に「月」を含む＝月次エントリのみ。コード降順＝新しい順。
+    months = [c["@code"] for c in classes if "月" in c["@name"]]
+    months.sort(reverse=True)
+    if len(months) < n:
+        logger.warning("月次エントリが %d 件しかない（要求 %d）", len(months), n)
+    return months[:n]
+
+
+def fetch_cpi_values(
+    session: requests.Session, time_codes: list[str]
+) -> list[dict]:
+    """getStatsData で対象スコープの VALUE 配列を取得して返す。
+
+    現スコープ(28,800行)は limit 10万未満で1リクエスト完結だが、
+    継続データ(NEXT_KEY)があれば辿る汎用実装にしておく。
+    """
+    params = {
+        "statsDataId": STATS_DATA_ID,
+        "cdTab": TAB_CODE,
+        "cdCat01": ",".join(CATEGORY_CODES),
+        "cdArea": ",".join(AREA_CODES),
+        "cdTime": ",".join(time_codes),
+        "metaGetFlg": "N",
+    }
+
+    all_values: list[dict] = []
+    start_position = None
+    while True:
+        page_params = dict(params)
+        if start_position is not None:
+            page_params["startPosition"] = start_position
+
+        body = _get_with_retry(session, "getStatsData", page_params)
+        stat = body["GET_STATS_DATA"]["STATISTICAL_DATA"]
+
+        values = stat["DATA_INF"]["VALUE"]
+        if isinstance(values, dict):  # 1件のみだと配列でなくdictで来る
+            values = [values]
+        all_values.extend(values)
+
+        next_key = stat.get("RESULT_INF", {}).get("NEXT_KEY")
+        if not next_key:
+            break
+        start_position = next_key
+        logger.info("継続データあり。次の開始位置 %s から取得", next_key)
+
+    return all_values
+
+
+def parse_values(values: list[dict]) -> pd.DataFrame:
+    """VALUE 配列を raw.cpi のスキーマに合わせた DataFrame に変換する。
+
+    - キー @tab/@cat01/@area/@time を各コード列へ。@unit は無ければ NULL。
+    - 値 $ は value_raw に原文保持、数値化できなければ value=NULL。
+      ('***' = 該当データなし、'-' 等の記号もここで NULL に落ちる)
+    """
+    if not values:
+        return pd.DataFrame(
+            columns=["tab_code", "area_code", "category_code",
+                     "time_code", "value", "value_raw", "unit"]
+        )
+
+    df = pd.DataFrame(values)
+    out = pd.DataFrame({
+        "tab_code": df["@tab"],
+        "area_code": df["@area"],
+        "category_code": df["@cat01"],
+        "time_code": df["@time"],
+        "value_raw": df["$"],
+        "unit": df["@unit"] if "@unit" in df.columns else pd.NA,
+    })
+    # 数値化（失敗は NaN→後でNULL）。value_raw には原文が残る。
+    out["value"] = pd.to_numeric(out["value_raw"], errors="coerce")
+    return out[["tab_code", "area_code", "category_code",
+                "time_code", "value", "value_raw", "unit"]]
+
+
+# --- DB ---
+UPSERT_SQL = """
+    INSERT INTO raw.cpi
+        (tab_code, area_code, category_code, time_code, value, value_raw, unit, loaded_at)
+    VALUES %s
+    ON CONFLICT (tab_code, area_code, category_code, time_code)
+    DO UPDATE SET
+        value     = EXCLUDED.value,
+        value_raw = EXCLUDED.value_raw,
+        unit      = EXCLUDED.unit,
+        loaded_at = now()
+"""
+
+
+def _connect():
+    """warehouse への接続を返す。接続情報は環境変数から取得。"""
+    return psycopg2.connect(
+        host=os.environ.get("WAREHOUSE_HOST", "localhost"),
+        port=int(os.environ.get("WAREHOUSE_PORT", "5432")),
+        dbname=os.environ["WAREHOUSE_DB"],
+        user=os.environ["POSTGRES_USER"],
+        password=os.environ["POSTGRES_PASSWORD"],
+    )
+
+
+def upsert_cpi(df: pd.DataFrame, conn=None) -> int:
+    """DataFrame を raw.cpi に冪等 UPSERT する。書き込んだ行数を返す。
+
+    主キー(tab,area,category,time)で衝突した既存行は値を更新し loaded_at を
+    現在時刻へ。新規行は挿入。再実行しても重複せず、最新月の後日反映にも追従する。
+    """
+    if df.empty:
+        logger.warning("空の DataFrame。UPSERT をスキップ")
+        return 0
+
+    # NaN/NA を psycopg2 が NULL として渡せるよう Python の None に変換
+    safe = df.astype(object).where(pd.notna(df), None)
+    rows = [
+        (r.tab_code, r.area_code, r.category_code, r.time_code,
+         r.value, r.value_raw, r.unit)
+        for r in safe.itertuples(index=False)
+    ]
+
+    own_conn = conn is None
+    if own_conn:
+        conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            # loaded_at は DEFAULT now() に任せるため VALUES 側では渡さない
+            template = "(%s, %s, %s, %s, %s, %s, %s, now())"
+            execute_values(cur, UPSERT_SQL, rows, template=template, page_size=1000)
+        conn.commit()
+        logger.info("UPSERT 完了: %d 行", len(rows))
+        return len(rows)
+    finally:
+        if own_conn:
+            conn.close()
+
+
 if __name__ == "__main__":
-    print(f"statsDataId   : {STATS_DATA_ID}")
-    print(f"categories    : {len(CATEGORY_CODES)}")
-    print(f"areas         : {len(AREA_CODES)}")
-    print(f"recent months : {RECENT_MONTHS}")
+    import os
+
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+
+    app_id = os.environ["ESTAT_APP_ID"]
+    session = _build_session(app_id)
+
+    months = fetch_recent_month_codes(session)
+    print(f"取得した月数: {len(months)}  最新={months[0]}  最古={months[-1]}")
+
+    values = fetch_cpi_values(session, months)
+    print(f"VALUE 件数: {len(values)}")
+
+    df = parse_values(values)
+    print(f"DataFrame shape: {df.shape}")
+    print(f"value が NULL の行数（***等）: {df['value'].isna().sum()}")
+    print(df.head())
+    
+    written = upsert_cpi(df)
+    print(f"UPSERT 行数: {written}")
