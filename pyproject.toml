@@ -43,6 +43,7 @@ dev = [
     "ruff",
     "mypy",
     "types-requests",
+    "responses"
 ]
 
 # このプロジェクトはアプリケーション（DAG + dbt + Docker構成）であり、
