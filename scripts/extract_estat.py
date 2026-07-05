@@ -253,8 +253,8 @@ def _connect():
         host=os.environ.get("WAREHOUSE_HOST", "localhost"),
         port=int(os.environ.get("WAREHOUSE_PORT", "5432")),
         dbname=os.environ["WAREHOUSE_DB"],
-        user=os.environ["POSTGRES_USER"],
-        password=os.environ["POSTGRES_PASSWORD"],
+        user=os.environ["WAREHOUSE_USER"],
+        password=os.environ["WAREHOUSE_PASSWORD"],
     )
 
 
@@ -292,24 +292,33 @@ def upsert_cpi(df: pd.DataFrame, conn=None) -> int:
             conn.close()
 
 
-if __name__ == "__main__":
-    import os
+def main() -> int:
+    """CPI を取得して raw.cpi に冪等ロードする。ロード行数を返す。
 
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-
+    CLI・CI・Airflow PythonOperator の共通エントリポイント。
+    Airflow 非依存の純 Python に保ち、オーケストレータから疎結合にする。
+    """
     app_id = os.environ["ESTAT_APP_ID"]
     session = _build_session(app_id)
 
     months = fetch_recent_month_codes(session)
-    print(f"取得した月数: {len(months)}  最新={months[0]}  最古={months[-1]}")
+    logger.info("取得した月数: %d  最新=%s  最古=%s", len(months), months[0], months[-1])
 
     values = fetch_cpi_values(session, months)
-    print(f"VALUE 件数: {len(values)}")
+    logger.info("VALUE 件数: %d", len(values))
 
     df = parse_values(values)
-    print(f"DataFrame shape: {df.shape}")
-    print(f"value が NULL の行数（***等）: {df['value'].isna().sum()}")
-    print(df.head())
-    
+    logger.info(
+        "DataFrame shape: %s  value NULL 行数(***等): %d",
+        df.shape,
+        df["value"].isna().sum(),
+    )
+
     written = upsert_cpi(df)
-    print(f"UPSERT 行数: {written}")
+    logger.info("UPSERT 行数: %d", written)
+    return written
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    main()
