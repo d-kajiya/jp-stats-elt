@@ -17,13 +17,45 @@ Week 3 以降で順次実装に置き換える:
 
 from __future__ import annotations
 
+import logging
+import sys
 from datetime import datetime, timedelta
 
 from airflow import DAG
 from airflow.operators.bash import BashOperator
 from airflow.operators.empty import EmptyOperator
+from airflow.operators.python import PythonOperator
+
+# scripts/ をコンテナ内 import パスに追加（/opt/airflow/scripts にマウント済み）
+sys.path.append("/opt/airflow/scripts")
 
 DBT_PROJECT_DIR = "/opt/airflow/dbt"
+
+def _run_extract() -> int:
+    """e-Stat から CPI を取得し raw.cpi へ冪等ロード。ロード行数を返す。"""
+    import extract_estat
+
+    return extract_estat.main()
+
+
+def _validate_load(min_rows: int = 20_000) -> None:
+    """raw.cpi の行数がしきい値以上かを検証するデータ契約ゲート。
+
+    tab_code='TEST' のテスト行は除外して本番相当のみ数える。
+    """
+    import extract_estat
+
+    with extract_estat._connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM raw.cpi WHERE tab_code <> 'TEST'")
+            (rows,) = cur.fetchone()
+
+    if rows < min_rows:
+        raise ValueError(
+            f"raw.cpi の行数が想定を下回っています: {rows} < {min_rows}"
+        )
+    logging.info("validate_load OK: raw.cpi に %d 行", rows)
+
 
 default_args = {
     "owner": "data-platform",
@@ -47,22 +79,16 @@ with DAG(
 
     start = EmptyOperator(task_id="start")
 
-    # Week 3-4 で実装: e-Stat API → ローカルJSON保存
-    extract = BashOperator(
+    # Week 4: e-Stat API から CPI を取得し raw.cpi へ冪等ロード
+    extract = PythonOperator(
         task_id="extract_estat",
-        bash_command=(
-            'echo "[extract] target month: {{ data_interval_start | ds }}"; '
-            'echo "TODO(Week 3-4): call e-Stat API for CPI and Labour Force Survey"'
-        ),
+        python_callable=_run_extract,
     )
 
-    # Week 3-4 で実装: JSON → PostgreSQL raw スキーマへ INSERT
-    load = BashOperator(
-        task_id="load_to_raw",
-        bash_command=(
-            'echo "[load] insert into raw.cpi / raw.labour_force"; '
-            'echo "TODO(Week 3-4): idempotent upsert using execution_date as partition key"'
-        ),
+    # Week 4: raw.cpi の行数を検証するデータ契約ゲート（dbt が読む前段）
+    load = PythonOperator(
+        task_id="validate_load",
+        python_callable=_validate_load,
     )
 
     # Week 5-6 で実モデルに置換
