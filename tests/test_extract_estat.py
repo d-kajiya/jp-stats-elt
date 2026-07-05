@@ -14,7 +14,7 @@ import pandas as pd
 import pytest
 import responses
 
-import scripts.extract_estat as e
+import extract_estat as e
 
 
 # --- parse_values: 正常系 ---

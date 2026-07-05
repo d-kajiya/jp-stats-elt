@@ -32,5 +32,13 @@ def test_jp_stats_elt_dag_present(dagbag):
 
 def test_expected_tasks_exist(dagbag):
     dag = dagbag.dags["jp_stats_elt"]
-    expected = {"start", "extract_estat", "load_to_raw", "dbt_run", "dbt_test", "end"}
+    expected = {"start", "extract_estat", "validate_load", "dbt_run", "dbt_test", "end"}
     assert expected.issubset(set(dag.task_ids))
+
+def test_extract_and_validate_are_python_operators(dagbag):
+    """Week 4: extract/validate は PythonOperator であること（Bash 逆戻り防止）。"""
+    from airflow.operators.python import PythonOperator
+
+    dag = dagbag.dags["jp_stats_elt"]
+    assert isinstance(dag.get_task("extract_estat"), PythonOperator)
+    assert isinstance(dag.get_task("validate_load"), PythonOperator)
