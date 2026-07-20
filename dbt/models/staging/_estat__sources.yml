@@ -1,0 +1,41 @@
+version: 2
+
+sources:
+  - name: estat
+    description: >
+      Raw layer populated by scripts/extract_estat.py (e-Stat CPI ingestion).
+      Loaded via idempotent UPSERT; one row per (tab, area, category, time).
+    schema: raw
+    tables:
+      - name: cpi
+        description: >
+          2020-base Consumer Price Index (statsDataId 0003427113).
+          Grain: tab_code x area_code x category_code x time_code.
+          Rolling 60-month window (national + 47 prefectural-capital cities x 10 major categories).
+        columns:
+          - name: tab_code
+            description: "Tabulation code (@tab). 1 = index (cdTab=1 at extraction)."
+            tests:
+              - not_null
+          - name: area_code
+            description: "Area code (@area). 00000 = national; XXA01 per capital city (Fukuoka = 40A02)."
+            tests:
+              - not_null
+          - name: category_code
+            description: "Item category code (@cat01). One of the 10 major CPI categories."
+            tests:
+              - not_null
+          - name: time_code
+            description: "Time axis (@time), format YYYY00MMMM (e.g. 2026000606 = 2026-06)."
+            tests:
+              - not_null
+          - name: value
+            description: "Numeric index value. NULL where the source cell was missing (***)."
+          - name: value_raw
+            description: "Original cell text (e.g. '***', '-') preserved for audit."
+          - name: unit
+            description: "Unit (@unit). NULL for CPI index (dimensionless)."
+          - name: loaded_at
+            description: "UPSERT timestamp (set to now() on every load)."
+            tests:
+              - not_null
