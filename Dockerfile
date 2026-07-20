@@ -39,6 +39,11 @@ RUN pip install --no-cache-dir \
         "pandas" \
         "pytest"
 
+# protobuf: dbt-core 1.8 は protobuf>=5.0,<6.0 を要求。
+# Airflow constraints は protobuf を 4.25.3 に固定するため、constrained install の
+# 後で 5.29.6 に明示上書きする（順序が重要。前段で入れても後段 constraint が引き下げる）。
+RUN pip install --no-cache-dir "protobuf==5.29.6"
+
 # dbt プロジェクトと DAG はボリュームマウントで持ち込む（イメージには含めない）
 ENV DBT_PROFILES_DIR=/opt/airflow/dbt
 ENV DBT_PROJECT_DIR=/opt/airflow/dbt
