@@ -15,19 +15,19 @@ sources:
         columns:
           - name: tab_code
             description: "Tabulation code (@tab). 1 = index (cdTab=1 at extraction)."
-            tests:
+            data_tests:
               - not_null
           - name: area_code
             description: "Area code (@area). 00000 = national; XXA01 per capital city (Fukuoka = 40A02)."
-            tests:
+            data_tests:
               - not_null
           - name: category_code
             description: "Item category code (@cat01). One of the 10 major CPI categories."
-            tests:
+            data_tests:
               - not_null
           - name: time_code
             description: "Time axis (@time), format YYYY00MMMM (e.g. 2026000606 = 2026-06)."
-            tests:
+            data_tests:
               - not_null
           - name: value
             description: "Numeric index value. NULL where the source cell was missing (***)."
@@ -37,5 +37,5 @@ sources:
             description: "Unit (@unit). NULL for CPI index (dimensionless)."
           - name: loaded_at
             description: "UPSERT timestamp (set to now() on every load)."
-            tests:
+            data_tests:
               - not_null
