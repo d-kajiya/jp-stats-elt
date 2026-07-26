@@ -1,0 +1,14 @@
+version: 2
+
+seeds:
+  - name: area_master
+    description: >
+      Static master mapping e-Stat CPI area_code to city/prefecture names
+      (JA/EN). 48 rows: national (00000) + 47 prefectural-capital cities.
+      Note area 40 uses 40A02 (Fukuoka City), not 40A01.
+    columns:
+      - name: area_code
+        description: "e-Stat area code; joins to raw.cpi.area_code."
+        data_tests:
+          - not_null
+          - unique
