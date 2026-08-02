@@ -91,18 +91,23 @@ with DAG(
         python_callable=_validate_load,
     )
 
-    # Week 5-6 で実モデルに置換
+    # Week 5: area_master seed をロード（stg_area_master が ref する）
+    dbt_seed = BashOperator(
+        task_id="dbt_seed",
+        bash_command=f"cd {DBT_PROJECT_DIR} && dbt seed --profiles-dir {DBT_PROJECT_DIR}",
+    )
+    # Week 5: staging モデルを構築（失敗はタスク失敗として扱う）
     dbt_run = BashOperator(
         task_id="dbt_run",
-        bash_command=f"cd {DBT_PROJECT_DIR} && dbt run --profiles-dir {DBT_PROJECT_DIR} || echo 'TODO(Week 5-6): no models yet'",
+        bash_command=f"cd {DBT_PROJECT_DIR} && dbt run --profiles-dir {DBT_PROJECT_DIR}",
     )
 
-    # Week 5-6 で実モデルに置換
+    # Week 5: source/seed/model の全テストを実行（失敗はタスク失敗）
     dbt_test = BashOperator(
         task_id="dbt_test",
-        bash_command=f"cd {DBT_PROJECT_DIR} && dbt test --profiles-dir {DBT_PROJECT_DIR} || echo 'TODO(Week 5-6): no tests yet'",
+        bash_command=f"cd {DBT_PROJECT_DIR} && dbt test --profiles-dir {DBT_PROJECT_DIR}",
     )
 
     end = EmptyOperator(task_id="end")
 
-    start >> extract >> load >> dbt_run >> dbt_test >> end
+    start >> extract >> load >> dbt_seed >> dbt_run >> dbt_test >> end
