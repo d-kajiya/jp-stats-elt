@@ -1,0 +1,11 @@
+category_code,category_name_ja,category_name_en,display_order
+0002,食料,Food,1
+0045,住居,Housing,2
+0054,光熱・水道,"Fuel, light & water charges",3
+0060,家具・家事用品,Furniture & household utensils,4
+0082,被服及び履物,Clothes & footwear,5
+0107,保健医療,Medical care,6
+0111,交通・通信,Transportation & communication,7
+0118,教育,Education,8
+0122,教養娯楽,Culture & recreation,9
+0145,諸雑費,Miscellaneous,10

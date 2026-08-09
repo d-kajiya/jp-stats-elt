@@ -12,3 +12,30 @@ seeds:
         data_tests:
           - not_null
           - unique
+
+  - name: category_master
+    description: >
+      Static master mapping e-Stat CPI category_code (10 major expenditure
+      groups) to Japanese/English names, with the official display order.
+      Japanese names are sourced from the e-Stat getMetaInfo API (cat01,
+      level 1); the leading code prefix in @name was stripped.
+    config:
+      column_types:
+        category_code: text
+        category_name_ja: text
+        category_name_en: text
+        display_order: integer
+    columns:
+      - name: category_code
+        description: >
+          e-Stat cat01 code, zero-padded 4 digits (e.g. 0002).
+          Must stay text: dbt infers integer and strips the leading zeros,
+          which silently breaks the join to stg_cpi_raw.category_code.
+        data_tests:
+          - not_null
+          - unique
+      - name: display_order
+        description: "Official CPI major-group presentation order (1-10)."
+        data_tests:
+          - not_null
+          - unique
