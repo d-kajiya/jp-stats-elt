@@ -1,0 +1,69 @@
+version: 2
+
+models:
+  - name: fct_cpi_monthly
+    description: >
+      Monthly CPI fact at (period, area_code, category_code) grain, restricted
+      to complete months and enriched with area and category names.
+      Materialised as a table so downstream aggregates do not recompute the
+      staging joins.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - period
+            - area_code
+            - category_code
+    columns:
+      - name: index_value
+        description: >
+          CPI index, 2020 base. Not null here by construction: the complete
+          month filter only admits periods where every area reported, so a
+          null would mean the filter or an upstream join has broken.
+        data_tests:
+          - not_null
+
+  - name: agg_cpi_yoy_change
+    description: >
+      Year-over-year percentage change of the CPI index, joined to the same
+      area and category twelve months earlier. Same grain as the fact.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - period
+            - area_code
+            - category_code
+    columns:
+      - name: yoy_change_pct
+        description: >
+          Null for the first twelve months of the window, which have no prior
+          year. Deliberately untested for null; the row count invariant above
+          is what guards the self join.
+
+  - name: agg_cpi_category_rank
+    description: >
+      Cities ranked by year-over-year change within each month and category,
+      with the national figure carried alongside as a comparison baseline.
+      The national aggregate (00000) is excluded from the ranking itself.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - period
+            - category_code
+            - area_code
+    columns:
+      - name: yoy_rank_desc
+        description: >
+          Rank within (period, category). Bounded by the 47 cities: a value
+          outside 1-47 would mean the national aggregate leaked into the
+          ranking or areas went missing.
+        data_tests:
+          - dbt_utils.accepted_range:
+              min_value: 1
+              max_value: 47
+              inclusive: true
+      - name: national_yoy_change_pct
+        description: >
+          The national figure for the same period and category. Null would
+          mean the join to the national aggregate failed.
+        data_tests:
+          - not_null
