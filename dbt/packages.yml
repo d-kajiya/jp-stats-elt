@@ -1,0 +1,8 @@
+# dbt package dependencies.
+#
+# Pinned to an exact version rather than a range: a range would let CI and a
+# local machine resolve to different builds, which is the class of drift that
+# makes "works on my machine" bugs. Run `dbt deps` after changing this file.
+packages:
+  - package: dbt-labs/dbt_utils
+    version: 1.3.0
