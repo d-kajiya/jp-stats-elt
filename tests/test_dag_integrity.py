@@ -32,8 +32,18 @@ def test_jp_stats_elt_dag_present(dagbag):
 
 def test_expected_tasks_exist(dagbag):
     dag = dagbag.dags["jp_stats_elt"]
-    expected = {"start", "extract_estat", "validate_load", "dbt_seed", "dbt_run", "dbt_test", "end"}
-    assert expected.issubset(set(dag.task_ids))
+    expected = {
+        "start",
+        "extract_estat",
+        "validate_load",
+        "dbt_deps",
+        "dbt_seed",
+        "dbt_run",
+        "dbt_test",
+        "end",
+    }
+    # issubset ではなく等価比較。タスクの追加も削除も検知したいため
+    assert set(dag.task_ids) == expected
 
 def test_extract_and_validate_are_python_operators(dagbag):
     """Week 4: extract/validate は PythonOperator であること（Bash 逆戻り防止）。"""
@@ -44,13 +54,18 @@ def test_extract_and_validate_are_python_operators(dagbag):
     assert isinstance(dag.get_task("validate_load"), PythonOperator)
 
 def test_dbt_task_ordering(dagbag):
-    """Week 5: seed -> run -> test の依存順を固定（seed は run の前に必須）。"""
+    """Week 5-6: deps -> seed -> run -> test の依存順を固定。
+
+    deps は dbt_utils を取得する。marts のテストが依存するため、
+    クリーンな環境では seed より前に走っていないと run/test が落ちる。
+    """
     dag = dagbag.dags["jp_stats_elt"]
 
     def downstream_ids(task_id):
         return {t.task_id for t in dag.get_task(task_id).downstream_list}
 
-    assert "dbt_seed" in downstream_ids("validate_load")
+    assert "dbt_deps" in downstream_ids("validate_load")
+    assert "dbt_seed" in downstream_ids("dbt_deps")
     assert "dbt_run" in downstream_ids("dbt_seed")
     assert "dbt_test" in downstream_ids("dbt_run")
 
@@ -60,6 +75,6 @@ def test_dbt_tasks_have_no_echo_fallback(dagbag):
     握り潰しを再導入すると dbt の失敗がタスク成功に化けるため、回帰を防ぐ。
     """
     dag = dagbag.dags["jp_stats_elt"]
-    for task_id in ("dbt_seed", "dbt_run", "dbt_test"):
+    for task_id in ("dbt_deps", "dbt_seed", "dbt_run", "dbt_test"):
         cmd = dag.get_task(task_id).bash_command
         assert "|| echo" not in cmd, f"{task_id} still swallows failures: {cmd}"

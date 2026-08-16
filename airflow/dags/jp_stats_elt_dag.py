@@ -91,6 +91,12 @@ with DAG(
         python_callable=_validate_load,
     )
 
+    # Week 6: dbt パッケージ（dbt_utils）を取得。marts のテストが依存するため、
+    # クリーンな環境でも自己完結するようパイプラインに組み込む。冪等かつ高速
+    dbt_deps = BashOperator(
+        task_id="dbt_deps",
+        bash_command=f"cd {DBT_PROJECT_DIR} && dbt deps --profiles-dir {DBT_PROJECT_DIR}",
+    )
     # Week 5: area_master seed をロード（stg_area_master が ref する）
     dbt_seed = BashOperator(
         task_id="dbt_seed",
@@ -110,4 +116,4 @@ with DAG(
 
     end = EmptyOperator(task_id="end")
 
-    start >> extract >> load >> dbt_seed >> dbt_run >> dbt_test >> end
+    start >> extract >> load >> dbt_deps >> dbt_seed >> dbt_run >> dbt_test >> end
