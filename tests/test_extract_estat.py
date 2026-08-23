@@ -139,9 +139,8 @@ def test_get_with_retry_auth_error_is_not_retried(monkeypatch):
 
     assert len(responses.calls) == 1  # リトライせず1回で諦める
 
-    # --- UPSERT: 冪等性の統合テスト（DB が無ければ skip）---
 
-
+# --- UPSERT: 冪等性の統合テスト（DB が無ければ skip）---
 @pytest.fixture
 def warehouse_conn():
     """warehouse へ接続。繋がらなければテストを skip し、終了時に閉じる。"""
@@ -153,8 +152,8 @@ def warehouse_conn():
             host=os.environ.get("WAREHOUSE_HOST", "localhost"),
             port=int(os.environ.get("WAREHOUSE_PORT", "5432")),
             dbname=os.environ.get("WAREHOUSE_DB", "warehouse"),
-            user=os.environ.get("POSTGRES_USER", "airflow"),
-            password=os.environ.get("POSTGRES_PASSWORD", "airflow"),
+            user=os.environ.get("WAREHOUSE_USER", "airflow"),
+            password=os.environ.get("WAREHOUSE_PASSWORD", "airflow"),
             connect_timeout=3,
         )
     except psycopg2.OperationalError as exc:
