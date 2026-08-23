@@ -21,15 +21,17 @@ import logging
 import sys
 from datetime import datetime, timedelta
 
-from airflow import DAG
 from airflow.operators.bash import BashOperator
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import PythonOperator
+
+from airflow import DAG
 
 # scripts/ をコンテナ内 import パスに追加（/opt/airflow/scripts にマウント済み）
 sys.path.append("/opt/airflow/scripts")
 
 DBT_PROJECT_DIR = "/opt/airflow/dbt"
+
 
 def _run_extract() -> int:
     """e-Stat から CPI を取得し raw.cpi へ冪等ロード。ロード行数を返す。"""
@@ -51,9 +53,7 @@ def _validate_load(min_rows: int = 20_000) -> None:
             (rows,) = cur.fetchone()
 
     if rows < min_rows:
-        raise ValueError(
-            f"raw.cpi の行数が想定を下回っています: {rows} < {min_rows}"
-        )
+        raise ValueError(f"raw.cpi の行数が想定を下回っています: {rows} < {min_rows}")
     logging.info("validate_load OK: raw.cpi に %d 行", rows)
 
 
@@ -76,7 +76,6 @@ with DAG(
     max_active_runs=1,
     tags=["elt", "estat", "dbt", "portfolio"],
 ) as dag:
-
     start = EmptyOperator(task_id="start")
 
     # Week 4: e-Stat API から CPI を取得し raw.cpi へ冪等ロード

@@ -4,6 +4,7 @@
 10大費目 × 全国＋47県庁所在市 × 直近60ヶ月の「指数」を取得し、
 PostgreSQL の raw.cpi に冪等ロードする。
 """
+
 from __future__ import annotations
 
 import logging
@@ -14,7 +15,6 @@ import pandas as pd
 import psycopg2
 import requests
 from psycopg2.extras import execute_values
-
 
 # --- API ---
 ESTAT_BASE_URL = "https://api.e-stat.go.jp/rest/3.0/app/json"
@@ -43,6 +43,7 @@ CATEGORY_CODES = [
 
 # 全国 + 47県庁所在市（CPIは都市調査のため都道府県データは無い。
 # 福岡の県庁所在市は福岡市=40A02。重複政令市 40A01北九州市 等は除外）
+# fmt: off
 AREA_CODES = [
     "00000",  # 全国
     "01A01", "02A01", "03A01", "04A01", "05A01", "06A01", "07A01",
@@ -53,6 +54,7 @@ AREA_CODES = [
     "36A01", "37A01", "38A01", "39A01", "40A02", "41A01", "42A01",
     "43A01", "44A01", "45A01", "46A01", "47A01",
 ]
+# fmt: on
 
 # --- 動的フィルタ ---
 # 時間軸は実行時に getMetaInfo から「月次の最新60件」を取得する（ローリング窓）。
@@ -61,13 +63,14 @@ RECENT_MONTHS = 60
 
 # --- リトライ設定 ---
 MAX_RETRIES = 5
-BACKOFF_BASE = 1.0 # 秒 1-2-4-8-16と待つ
-TIMEOUT = 30.0 # 秒
+BACKOFF_BASE = 1.0  # 秒 1-2-4-8-16と待つ
+TIMEOUT = 30.0  # 秒
 
 # 一時的エラーとみなす本文STATUS（DBアクセス系の内部エラ）
 RETRYABLE_BODY_STATUS = {200, 201, 202, 203, 299}
 
 logger = logging.getLogger(__name__)
+
 
 class EStatError(RuntimeError):
     """リトライしても回復しなかった、または恒久的な API エラー。"""
@@ -80,9 +83,7 @@ def _build_session(app_id: str) -> requests.Session:
     return session
 
 
-def _get_with_retry(
-    session: requests.Session, endpoint: str, params: dict
-) -> dict:
+def _get_with_retry(session: requests.Session, endpoint: str, params: dict) -> dict:
     """e-Stat の1エンドポイントを叩き、正常な JSON 本文(dict)を返す。
 
     一時的エラー(HTTP 429/5xx・本文 STATUS 200番台)は指数バックオフで再試行。
@@ -98,8 +99,9 @@ def _get_with_retry(
             # ネットワーク層の例外（接続断・タイムアウト等）は一時的とみなす
             if attempt == MAX_RETRIES:
                 raise EStatError(f"network error after {attempt} tries: {exc}") from exc
-            logger.warning("network error (try %d/%d): %s — retrying in %.0fs",
-                           attempt, MAX_RETRIES, exc, wait)
+            logger.warning(
+                "network error (try %d/%d): %s — retrying in %.0fs", attempt, MAX_RETRIES, exc, wait
+            )
             time.sleep(wait)
             continue
 
@@ -107,8 +109,13 @@ def _get_with_retry(
         if resp.status_code in (429,) or 500 <= resp.status_code < 600:
             if attempt == MAX_RETRIES:
                 raise EStatError(f"HTTP {resp.status_code} after {attempt} tries")
-            logger.warning("HTTP %d (try %d/%d) — retrying in %.0fs",
-                           resp.status_code, attempt, MAX_RETRIES, wait)
+            logger.warning(
+                "HTTP %d (try %d/%d) — retrying in %.0fs",
+                resp.status_code,
+                attempt,
+                MAX_RETRIES,
+                wait,
+            )
             time.sleep(wait)
             continue
         if resp.status_code != 200:
@@ -129,8 +136,9 @@ def _get_with_retry(
         if status in RETRYABLE_BODY_STATUS:
             if attempt == MAX_RETRIES:
                 raise EStatError(f"body STATUS {status} after {attempt} tries")
-            logger.warning("body STATUS %d (try %d/%d) — retrying in %.0fs",
-                           status, attempt, MAX_RETRIES, wait)
+            logger.warning(
+                "body STATUS %d (try %d/%d) — retrying in %.0fs", status, attempt, MAX_RETRIES, wait
+            )
             time.sleep(wait)
             continue
         # STATUS 100(認証)/101(必須欠落)/102(値不正)/300(データ無) 等は恒久的
@@ -139,9 +147,7 @@ def _get_with_retry(
     raise EStatError("exhausted retries")  # 到達しない保険
 
 
-def fetch_recent_month_codes(
-    session: requests.Session, n: int = RECENT_MONTHS
-) -> list[str]:
+def fetch_recent_month_codes(session: requests.Session, n: int = RECENT_MONTHS) -> list[str]:
     """getMetaInfo から月次の時間軸コードを取得し、新しい順で上位 n 件を返す。
 
     月は毎月増えるため実行時に取り直す（ローリング窓）。
@@ -164,9 +170,7 @@ def fetch_recent_month_codes(
     return months[:n]
 
 
-def fetch_cpi_values(
-    session: requests.Session, time_codes: list[str]
-) -> list[dict]:
+def fetch_cpi_values(session: requests.Session, time_codes: list[str]) -> list[dict]:
     """getStatsData で対象スコープの VALUE 配列を取得して返す。
 
     現スコープ(28,800行)は limit 10万未満で1リクエスト完結だが、
@@ -214,23 +218,33 @@ def parse_values(values: list[dict]) -> pd.DataFrame:
     """
     if not values:
         return pd.DataFrame(
-            columns=["tab_code", "area_code", "category_code",
-                     "time_code", "value", "value_raw", "unit"]
+            columns=[
+                "tab_code",
+                "area_code",
+                "category_code",
+                "time_code",
+                "value",
+                "value_raw",
+                "unit",
+            ]
         )
 
     df = pd.DataFrame(values)
-    out = pd.DataFrame({
-        "tab_code": df["@tab"],
-        "area_code": df["@area"],
-        "category_code": df["@cat01"],
-        "time_code": df["@time"],
-        "value_raw": df["$"],
-        "unit": df["@unit"] if "@unit" in df.columns else pd.NA,
-    })
+    out = pd.DataFrame(
+        {
+            "tab_code": df["@tab"],
+            "area_code": df["@area"],
+            "category_code": df["@cat01"],
+            "time_code": df["@time"],
+            "value_raw": df["$"],
+            "unit": df["@unit"] if "@unit" in df.columns else pd.NA,
+        }
+    )
     # 数値化（失敗は NaN→後でNULL）。value_raw には原文が残る。
     out["value"] = pd.to_numeric(out["value_raw"], errors="coerce")
-    return out[["tab_code", "area_code", "category_code",
-                "time_code", "value", "value_raw", "unit"]]
+    return out[
+        ["tab_code", "area_code", "category_code", "time_code", "value", "value_raw", "unit"]
+    ]
 
 
 # --- DB ---
@@ -271,8 +285,7 @@ def upsert_cpi(df: pd.DataFrame, conn=None) -> int:
     # NaN/NA を psycopg2 が NULL として渡せるよう Python の None に変換
     safe = df.astype(object).where(pd.notna(df), None)
     rows = [
-        (r.tab_code, r.area_code, r.category_code, r.time_code,
-         r.value, r.value_raw, r.unit)
+        (r.tab_code, r.area_code, r.category_code, r.time_code, r.value, r.value_raw, r.unit)
         for r in safe.itertuples(index=False)
     ]
 

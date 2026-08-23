@@ -6,31 +6,48 @@
   - UPSERT は DB 接続を伴うため、psycopg2/DB が無い環境では skip
 Week 3 抽出フェーズのロジックを回帰テストで保護する。
 """
+
 from __future__ import annotations
 
 import math
 
+import extract_estat as e
 import pandas as pd
 import pytest
 import responses
-
-import extract_estat as e
 
 
 # --- parse_values: 正常系 ---
 def test_parse_values_basic_shape():
     values = [
-        {"@tab": "1", "@cat01": "0002", "@area": "13A01",
-         "@time": "2026000505", "@unit": "", "$": "128.2"},
-        {"@tab": "1", "@cat01": "0045", "@area": "00000",
-         "@time": "2026000505", "@unit": "", "$": "104.6"},
+        {
+            "@tab": "1",
+            "@cat01": "0002",
+            "@area": "13A01",
+            "@time": "2026000505",
+            "@unit": "",
+            "$": "128.2",
+        },
+        {
+            "@tab": "1",
+            "@cat01": "0045",
+            "@area": "00000",
+            "@time": "2026000505",
+            "@unit": "",
+            "$": "104.6",
+        },
     ]
     df = e.parse_values(values)
 
     # 列が raw.cpi のスキーマ順で揃っている
     assert list(df.columns) == [
-        "tab_code", "area_code", "category_code",
-        "time_code", "value", "value_raw", "unit",
+        "tab_code",
+        "area_code",
+        "category_code",
+        "time_code",
+        "value",
+        "value_raw",
+        "unit",
     ]
     assert len(df) == 2
     # コード列が正しくマッピングされている
@@ -44,8 +61,14 @@ def test_parse_values_basic_shape():
 # --- parse_values: 欠損マーカー *** → value=NULL, value_raw=原文 ---
 def test_parse_values_missing_marker_becomes_null():
     values = [
-        {"@tab": "1", "@cat01": "0002", "@area": "47A01",
-         "@time": "2021000606", "@unit": "", "$": "***"},
+        {
+            "@tab": "1",
+            "@cat01": "0002",
+            "@area": "47A01",
+            "@time": "2021000606",
+            "@unit": "",
+            "$": "***",
+        },
     ]
     df = e.parse_values(values)
 
@@ -58,14 +81,20 @@ def test_parse_values_missing_marker_becomes_null():
 # --- parse_values: @unit キー欠如 → unit 列は NA ---
 def test_parse_values_missing_unit_key():
     values = [
-        {"@tab": "1", "@cat01": "0002", "@area": "13A01",
-         "@time": "2026000505", "$": "128.2"},  # @unit が無い（CPI の実形状）
+        {
+            "@tab": "1",
+            "@cat01": "0002",
+            "@area": "13A01",
+            "@time": "2026000505",
+            "$": "128.2",
+        },  # @unit が無い（CPI の実形状）
     ]
     df = e.parse_values(values)
 
     assert "unit" in df.columns
     assert pd.isna(df.loc[0, "unit"])
-    
+
+
 # --- _get_with_retry: HTTP 502 が続いた後に成功（リトライが効く）---
 @responses.activate
 def test_get_with_retry_recovers_after_502(monkeypatch):
@@ -77,7 +106,8 @@ def test_get_with_retry_recovers_after_502(monkeypatch):
     responses.add(responses.GET, url, status=502)
     responses.add(responses.GET, url, status=502)
     responses.add(
-        responses.GET, url,
+        responses.GET,
+        url,
         json={"GET_STATS_DATA": {"RESULT": {"STATUS": 0, "ERROR_MSG": "正常"}}},
         status=200,
     )
@@ -97,9 +127,9 @@ def test_get_with_retry_auth_error_is_not_retried(monkeypatch):
     url = f"{e.ESTAT_BASE_URL}/getStatsList"
     # HTTP は 200 だが本文 STATUS=100（恒久的エラー）
     responses.add(
-        responses.GET, url,
-        json={"GET_STATS_LIST": {"RESULT": {"STATUS": 100,
-              "ERROR_MSG": "認証に失敗しました。"}}},
+        responses.GET,
+        url,
+        json={"GET_STATS_LIST": {"RESULT": {"STATUS": 100, "ERROR_MSG": "認証に失敗しました。"}}},
         status=200,
     )
 
@@ -107,9 +137,11 @@ def test_get_with_retry_auth_error_is_not_retried(monkeypatch):
     with pytest.raises(e.EStatError):
         e._get_with_retry(session, "getStatsList", {})
 
-    assert len(responses.calls) == 1  # リトライせず1回で諦める    
-    
+    assert len(responses.calls) == 1  # リトライせず1回で諦める
+
     # --- UPSERT: 冪等性の統合テスト（DB が無ければ skip）---
+
+
 @pytest.fixture
 def warehouse_conn():
     """warehouse へ接続。繋がらなければテストを skip し、終了時に閉じる。"""
@@ -134,12 +166,28 @@ def warehouse_conn():
 
 def _make_test_df():
     """本番データと混ざらない隔離用 DataFrame（tab_code='TEST'）。"""
-    return pd.DataFrame([
-        {"tab_code": "TEST", "area_code": "00000", "category_code": "0002",
-         "time_code": "9999000101", "value": 100.0, "value_raw": "100.0", "unit": None},
-        {"tab_code": "TEST", "area_code": "00000", "category_code": "0045",
-         "time_code": "9999000101", "value": 200.0, "value_raw": "200.0", "unit": None},
-    ])
+    return pd.DataFrame(
+        [
+            {
+                "tab_code": "TEST",
+                "area_code": "00000",
+                "category_code": "0002",
+                "time_code": "9999000101",
+                "value": 100.0,
+                "value_raw": "100.0",
+                "unit": None,
+            },
+            {
+                "tab_code": "TEST",
+                "area_code": "00000",
+                "category_code": "0045",
+                "time_code": "9999000101",
+                "value": 200.0,
+                "value_raw": "200.0",
+                "unit": None,
+            },
+        ]
+    )
 
 
 def test_upsert_is_idempotent(warehouse_conn):

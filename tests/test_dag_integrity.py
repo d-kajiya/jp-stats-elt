@@ -45,6 +45,7 @@ def test_expected_tasks_exist(dagbag):
     # issubset ではなく等価比較。タスクの追加も削除も検知したいため
     assert set(dag.task_ids) == expected
 
+
 def test_extract_and_validate_are_python_operators(dagbag):
     """Week 4: extract/validate は PythonOperator であること（Bash 逆戻り防止）。"""
     from airflow.operators.python import PythonOperator
@@ -52,6 +53,7 @@ def test_extract_and_validate_are_python_operators(dagbag):
     dag = dagbag.dags["jp_stats_elt"]
     assert isinstance(dag.get_task("extract_estat"), PythonOperator)
     assert isinstance(dag.get_task("validate_load"), PythonOperator)
+
 
 def test_dbt_task_ordering(dagbag):
     """Week 5-6: deps -> seed -> run -> test の依存順を固定。
