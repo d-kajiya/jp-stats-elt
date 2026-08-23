@@ -30,3 +30,26 @@ jobs:
 
       - name: Run ruff format check
         run: ruff format --check .
+  test:
+    name: Test (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # ランタイム依存は requirements.lock（Airflow constraints 準拠）から、
+      # テスト専用依存は .[dev] から入れる。本番イメージと同じ解決結果になる。
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.lock
+          pip install -e ".[dev]" --no-deps
+
+      # DB を用意しないため test_upsert_is_idempotent は skip される想定。
+      # -rs で skip の理由をログに出し、意図した skip か毎回確認できるようにする。
+      - name: Run pytest
+        run: pytest -rs
