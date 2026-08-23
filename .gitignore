@@ -11,6 +11,8 @@ htmlcov/
 .venv/
 venv/
 env/
+# uv が自動生成するロックファイル。依存の正は requirements.lock（Airflow constraints 準拠）
+uv.lock
 
 # ===== Environment =====
 .env

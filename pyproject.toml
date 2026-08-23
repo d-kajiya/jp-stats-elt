@@ -40,7 +40,7 @@ dependencies = [
 dev = [
     "pytest",
     "pytest-cov",
-    "ruff",
+    "ruff==0.16.4",
     "mypy",
     "types-requests",
     "responses"
