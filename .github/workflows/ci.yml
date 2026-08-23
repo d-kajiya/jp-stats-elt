@@ -42,12 +42,15 @@ jobs:
         with:
           python-version: "3.11"
 
-      # ランタイム依存は requirements.lock（Airflow constraints 準拠）から、
-      # テスト専用依存は .[dev] から入れる。本番イメージと同じ解決結果になる。
+      # ランタイム依存は requirements.lock（Airflow constraints 準拠）から。
+      # テスト専用依存は pyproject.toml の dev extras から入れる。
+      # lock を先に入れているので、dev extras 側の無指定パッケージは
+      # 既存のインストール済みバージョンで要求が満たされ、上書きされない。
       - name: Install dependencies
         run: |
           pip install -r requirements.lock
-          pip install -e ".[dev]" --no-deps
+          pip install ".[dev]"
+          pip list | grep -Ei 'ruff|pytest|responses|apache-airflow |pandas'
 
       # DB を用意しないため test_upsert_is_idempotent は skip される想定。
       # -rs で skip の理由をログに出し、意図した skip か毎回確認できるようにする。
