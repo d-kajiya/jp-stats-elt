@@ -49,6 +49,8 @@ data/processed/
 *.csv
 *.parquet
 !dbt/seeds/*.csv
+# CI で raw.cpi を再現するための固定フィクスチャ（実データの部分集合）
+!tests/fixtures/*.csv
 
 # ===== Docker =====
 .docker/
