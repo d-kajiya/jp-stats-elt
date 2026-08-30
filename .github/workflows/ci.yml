@@ -56,3 +56,67 @@ jobs:
       # -rs で skip の理由をログに出し、意図した skip か毎回確認できるようにする。
       - name: Run pytest
         run: pytest -rs
+        
+  dbt:
+    name: dbt (build)
+    runs-on: ubuntu-latest
+
+    # dbt は DB が無いと何も検証できないので、ジョブ専用の postgres を立てる。
+    # health-cmd が通るまで GitHub Actions がステップ開始を待ってくれる。
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: airflow
+          POSTGRES_PASSWORD: airflow
+          POSTGRES_DB: warehouse
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    # profiles.yml は全項目が env_var 経由なので、CI 用の target を足さずに
+    # 環境変数を渡すだけで dev target がこの postgres を指す。
+    env:
+      WAREHOUSE_HOST: localhost
+      WAREHOUSE_PORT: "5432"
+      WAREHOUSE_USER: airflow
+      WAREHOUSE_PASSWORD: airflow
+      WAREHOUSE_DB: warehouse
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dbt
+        run: pip install -r requirements.lock
+
+      # 本番と同じ DDL を流す。CI 専用のスキーマ定義を書くと本番と乖離する。
+      - name: Create warehouse schema
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/init-warehouse.sql
+        env:
+          DATABASE_URL: postgresql://airflow:airflow@localhost:5432/warehouse
+
+      # extract の代わりに固定フィクスチャを流し込む。
+      - name: Load raw.cpi fixture
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "\copy raw.cpi (tab_code, area_code, category_code, time_code, value, value_raw, unit) FROM 'tests/fixtures/raw_cpi_sample.csv' WITH CSV HEADER"
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "SELECT COUNT(*) AS raw_cpi_rows FROM raw.cpi;"
+        env:
+          DATABASE_URL: postgresql://airflow:airflow@localhost:5432/warehouse
+
+      - name: Install dbt packages
+        run: dbt deps --project-dir dbt --profiles-dir dbt
+
+      - name: Run dbt build
+        run: dbt build --project-dir dbt --profiles-dir dbt
