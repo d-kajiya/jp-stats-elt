@@ -1,5 +1,4 @@
 # jp-stats-elt
-
 [![CI](https://github.com/d-kajiya/jp-stats-elt/actions/workflows/ci.yml/badge.svg)](https://github.com/d-kajiya/jp-stats-elt/actions/workflows/ci.yml)
 
 A locally-runnable ELT pipeline that ingests Japanese government statistics from the
@@ -72,8 +71,10 @@ e-Stat REST API.
 ---
 
 ## Quick start
-For WSL2 / Linux environments: Run `make init-dirs` before the first launch. This will create `airflow/logs/` with ownership matching the UID (50000) of the Airflow container.
+> **WSL2 / Linux users:** run `make init-dirs` before the first launch, and see
+> [Directory ownership](#directory-ownership) below if dbt reports permission errors.
 
+---
 
 ### Prerequisites
 
@@ -115,6 +116,23 @@ docker compose exec airflow-scheduler airflow dags trigger jp_stats_elt
 docker compose down       # stop containers, keep data
 docker compose down -v    # also wipe the Postgres volume
 ```
+
+---
+
+## Directory ownership
+
+The Airflow container runs as UID `50000`, while bind-mounted directories are owned
+by your host user. Three places need attention on WSL2 / Linux:
+
+| Path | Command | Why |
+|---|---|---|
+| `airflow/logs/` | `make init-dirs` | Airflow writes task logs here; without it the stack restart-loops |
+| `dbt/logs/`, `dbt/target/` | `sudo chown -R 50000:0 dbt/logs dbt/target` | dbt writes its run artifacts here |
+| `dbt/` itself | `sudo chown :0 dbt && sudo chmod g+w dbt` | `dbt deps` writes `package-lock.yml` directly into `dbt/` |
+
+The last one is deliberately **not** `chown -R`. Handing the whole tree to UID 50000
+would stop you editing the SQL and YAML from the host. Leaving the owner alone and
+opening group write access is enough, because the `airflow` user belongs to group 0.
 
 ---
 
@@ -201,11 +219,10 @@ environments resolve to the same versions.
 ---
 
 ## Roadmap
-
 - [x] **Week 1-2** — Repository scaffold, Docker Compose, minimal DAG
-- [ ] **Week 3-4** — e-Stat extraction + idempotent load into `raw.*`
-- [ ] **Week 5-6** — dbt staging / intermediate / marts + tests
-- [ ] **Week 7-8** — GitHub Actions CI, architecture docs, English README polish
+- [x] **Week 3-4** — e-Stat extraction + idempotent load into `raw.*`
+- [x] **Week 5-6** — dbt staging / intermediate / marts + tests
+- [ ] **Week 7-8** — GitHub Actions CI (done), architecture docs, English README polish
 
 ### Future improvements (out of scope for the initial release)
 
