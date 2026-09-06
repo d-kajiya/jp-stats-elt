@@ -2,7 +2,7 @@
 #
 # レイヤ構成:
 #  staging      → 1:1 で raw を整形（型・カラム名・NULL処理のみ）
-#  intermediate → 複数 staging の結合・ピボット
+#  intermediate → 複数 staging の結合・分析対象の選別（完全月フィルタ）
 #  marts        → 分析利用に耐える最終形（ファクト/集計）
 
 name: 'jp_stats_elt'
