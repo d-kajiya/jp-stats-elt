@@ -8,14 +8,12 @@
 >while the README covers "usage" and architecture.md details the "design,"
 >this document chronicles "what was decided, when, and why" in chronological order.
 ## Roadmap
-
 | Week | Goal | Status |
 |---|---|---|
-| 1-2 | Repository scaffold, Docker Compose, minimal DAG | **In progress** (local env done, Docker startup pending) |
-| 3-4 | e-Stat extraction + idempotent load into `raw.*` | **Done** (statsDataId=0003427113, 28,800 rows/extract verified) |
-| 5-6 | dbt staging / intermediate / marts + tests | Not started |
-| 7-8 | GitHub Actions CI, architecture docs, README polish | Not started |
-
+| 1-2 | Repository scaffold, Docker Compose, minimal DAG | **Done** (stack healthy, DAG parses, pushed to GitHub) |
+| 3-4 | e-Stat extraction + idempotent load into `raw.*` | **Done** (statsDataId=0003427113, 28,330 rows loaded; wired into the DAG as PythonOperator) |
+| 5-6 | dbt staging / intermediate / marts + tests | **Done** (2 seeds, 7 models, 17 data tests; `dbt build` = 26 PASS) |
+| 7-8 | GitHub Actions CI, architecture docs, README polish | **In progress** (CI green: lint / pytest / dbt; docs pending) |
 ---
 
 ## Week 1-2 progress detail
@@ -32,11 +30,154 @@
 - `Makefile` — `setup`, `lint`, `test`, `up`, `down`, `logs`, `clean`
 - `tests/test_dag_integrity.py` — passes locally (3 passed in 2.03s)
 
-### Pending
+### Resolved during Week 1-2: Airflow log UID mismatch
 
-- `make build` + `make up` — verify Docker stack starts and Airflow UI is reachable at `http://localhost:8080`
-- Trigger DAG `jp_stats_elt` manually and confirm all 6 tasks succeed
-- `git init` → first commit → push to GitHub
+The stack restart-looped after `make up`. The container runs as UID `50000`, but
+the bind-mounted `airflow/logs/` was owned by the host user (UID 1000), so Airflow
+could not write and raised `PermissionError`. Fixed with
+`sudo chown -R 50000:0 airflow/logs`, made permanent as the `init-dirs` target in
+the Makefile so a fresh clone does not hit the same wall.
+
+---
+
+## Week 3-4 progress detail
+
+### Week 3 — e-Stat extraction
+
+- `scripts/extract_estat.py` — API client with retry/backoff, dynamic time-axis
+  fetch, and idempotent UPSERT into `raw.cpi`
+- Verified against the live API: **28,330 rows** loaded; idempotency proven at the
+  database level (re-running leaves row count unchanged, only `loaded_at` moves)
+- Extraction scope: `cdTab=1` (index), 10 explicit `cdCat01` codes, 48 areas
+  (nationwide + 47 prefectural capitals), rolling 60-month window
+
+Two domain corrections came out of this week. CPI is a **city** survey, so there is
+no prefecture-level data — the unit is the prefectural capital, and Fukuoka's
+representative city is Fukuoka City (`40A02`), not Kitakyushu (`40A01`). The ten
+major categories also cannot be selected via `lvCat01`; the codes must be listed
+explicitly.
+
+### Week 4 — DAG integration
+
+- `extract_estat.main()` extracted as a shared entry point for CLI, CI and Airflow
+- DB credentials unified under the `WAREHOUSE_*` namespace
+- `extract` became a `PythonOperator`; `load` was **repurposed** as `validate_load`,
+  a contract gate asserting `raw.cpi` holds at least 20,000 rows
+- End-to-end run: all 6 tasks succeeded
+
+Extract and load were deliberately **not** split into separate tasks. They are
+technically inseparable here — the DataFrame goes straight from memory into the
+UPSERT — and passing a large DataFrame through XCom would be fragile. Turning
+`load` into a validation gate keeps the task count honest and sets up the later
+Great Expectations work.
+
+---
+
+## Week 5-6 progress detail
+
+### Week 5 — dbt staging
+
+- `_estat__sources.yml` declares the `estat` source; `not_null` on the four PK
+  columns plus `loaded_at`. `value` / `value_raw` / `unit` are left untested on
+  purpose, because `***` legitimately becomes NULL
+- `stg_cpi_raw.sql` — typed 1:1 view; `period DATE` derived from `time_code`
+  (format `YYYY00MMMM`, verified across all 60 months in the real data)
+- `area_master` seed (48 rows) plus `stg_area_master`
+- `generate_schema_name` macro override
+- `dbt_seed` added to the DAG, and the `|| echo` fallbacks removed from
+  `dbt_run` / `dbt_test`
+
+Two things are worth recording. The **protobuf conflict** that had been open for
+weeks was closed here: dbt-core 1.8 needs `protobuf>=5.0`, but Airflow 2.9.3's
+constraints pin it to 4.25.3, and the constrained install in the Dockerfile was
+silently downgrading it after dbt was installed. The fix is ordering — an
+independent `RUN pip install "protobuf==5.29.6"` **after** the constrained
+install, so nothing can pull it back down.
+
+The `|| echo` fallbacks were **swallowing dbt failures into task success**. They
+could only be removed once protobuf was fixed and exit code 0 was guaranteed;
+removing them earlier would have turned passing dbt runs into failing tasks.
+
+### Week 6 — intermediate and marts
+
+- `category_master` seed (10 rows) + `stg_category_master`
+- `int_cpi_monthly` (view) — complete-month filter, joins area and category names
+- `fct_cpi_monthly` → `agg_cpi_yoy_change` → `agg_cpi_category_rank` (tables)
+- `dbt_utils` pinned to 1.3.0; both `packages.yml` and `package-lock.yml` committed
+- 6 marts tests (grain, value range, join integrity); `dbt build` = 26 PASS
+- `dbt_deps` added to the DAG ahead of `dbt_seed`; full run = 8 tasks succeeded
+
+**dbt seed's type inference is quietly destructive.** It read `category_code` as
+integer and stripped the leading zero from `0002`, turning it into `2` and breaking
+every join against `stg_cpi_raw` — while exiting 0 and looking successful. Fixed by
+declaring `column_types: text` in `_seeds.yml`, which only takes effect with
+`--full-refresh` because an ordinary seed is truncate-and-insert and keeps the
+existing column types. `area_master` escaped this only by luck: codes like `13A01`
+contain letters, so they were never inferred as integers.
+
+Year-over-year uses a **date self-join** rather than `LAG(index_value, 12)`.
+LAG counts twelve *rows* back, not twelve *months*; the two agree only when the
+series has no gaps, and when a gap appears LAG silently compares the wrong month
+instead of raising anything. A date join simply yields NULL when no matching row
+exists.
+
+---
+## Week 7 progress detail
+
+### GitHub Actions CI
+
+Three jobs run in parallel on push to `main` and on PRs, in `.github/workflows/ci.yml`:
+
+| Job | What it runs | Duration |
+|---|---|---|
+| `lint` | `ruff check` + `ruff format --check` | ~10s |
+| `test` | `pytest -rs` (11 passed, 1 skipped) | ~1m |
+| `dbt` | `dbt deps` + `dbt build` against a postgres service | ~1m30s |
+
+**ruff was unpinned.** `pyproject.toml` listed it with no version, so local and CI
+could resolve to different builds and disagree about what counts as a lint error.
+It is now pinned to `0.16.4` — the same reasoning already applied to
+`requirements.lock` and to `dbt_utils`. This mattered immediately: the lock file
+still carried ruff 0.3.3 from Week 1-2, and without the pin CI would have linted
+with a version 13 minors behind the local one.
+
+Upgrading 0.3.3 → 0.16.4 surfaced only one new violation (import ordering), and
+`ruff format` was then applied across all Python sources as a single `style:`
+commit. `AREA_CODES` is wrapped in `fmt: off` / `fmt: on` so the 47-prefecture
+grid stays readable; a formatter is worth deferring to everywhere except where
+the layout itself carries information.
+
+### Seeding `raw.cpi` in CI
+
+The open question from Week 6 was how `dbt build` could pass when CI has no
+extracted data. Excluding the source and staging models would have been simplest,
+but everything downstream depends on `stg_cpi_raw`, so CI would have verified
+almost nothing. Calling the e-Stat API from CI would make every run depend on an
+external service that is known to return 502 during maintenance windows.
+
+The chosen approach is a committed fixture: `tests/fixtures/raw_cpi_sample.csv`,
+a 14-month slice of the real data (6,250 rows). CI runs the production
+`scripts/init-warehouse.sql` — the same DDL the Docker stack uses, so the CI
+schema cannot drift from production — and copies the fixture into `raw.cpi`.
+
+The fixture deliberately includes **2026-07, which covers only one area**, because
+that is what makes the complete-month filter in `int_cpi_monthly` observably do
+something. Raw holds 6,250 rows and marts hold 6,240; if a regression dropped the
+`HAVING` clause, that difference would disappear and CI would fail rather than
+pass silently.
+
+`profiles.yml` needed no CI-specific target: every field already reads from
+`env_var`, so exporting `WAREHOUSE_*` is enough to point the `dev` target at the
+CI postgres service. That was a Week 1-2 decision paying off six weeks later.
+
+### Fixed along the way
+
+- `warehouse_conn` in `tests/test_extract_estat.py` still read
+  `POSTGRES_USER` / `POSTGRES_PASSWORD` while host, port and dbname had already
+  moved to `WAREHOUSE_*` in Week 4. Harmless locally, since both default to
+  `airflow`, but it would have ignored credentials injected by CI
+- `dbt_project.yml` still described the intermediate layer as doing pivots, which
+  stopped being true when `int_cpi_pivoted` was dropped
 
 ---
 
@@ -82,20 +223,7 @@ These were settled in earlier discussions and should not be re-opened without ex
 
 ---
 
-## Outstanding questions before Week 3
-
-The following must be resolved before starting Week 3:
-
-1. **e-Stat API application ID**: Needs to be obtained from <https://www.e-stat.go.jp/api/>.
-2. **CPI ingestion granularity**: Settled. statsDataId=`0003427113` (2020-base CPI).
-   Scope = tabulation: index (cdTab=1) × 10 major expense categories × nationwide + 47 prefectural capital cities (48 areas) × most recent 60 months.
-   **Important**: CPI is a city-based survey, so prefecture-level data does not exist; the area unit is the prefectural capital city.
-   Fukuoka's representative city is Fukuoka City = `40A02` (note: `40A01` is Kitakyushu City).
-3. **Time range**: Recommended starting scope — most recent 5 years (60 months). Backfill can extend later.
-
----
-
-## Lessons learned (Week 1-2 setup pitfalls)
+## Environment pitfalls
 
 Notes for future reference and for portfolio talking points:
 
