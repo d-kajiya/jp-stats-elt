@@ -1,13 +1,12 @@
 """
-jp-stats-elt の最小ELT DAG（Week 1-2 スケルトン）
+jp-stats-elt: e-Stat の消費者物価指数を取り込み、dbt で変換する月次 ELT DAG。
 
-このDAGはWeek 1-2の動作確認用に「extract → load → dbt_run → dbt_test」の
-タスク骨格を示すもの。各タスクは現時点では echo のプレースホルダで、
-Week 3 以降で順次実装に置き換える:
+タスク構成:
+  start → extract_estat → validate_load → dbt_deps → dbt_seed → dbt_run → dbt_test → end
 
-  Week 3-4: extract / load を e-Stat API + PostgreSQL INSERT に差し替え
-  Week 5-6: dbt_run / dbt_test を実モデルに差し替え
-  Week 7-8: GitHub Actions CI から dbt test を呼ぶ
+  extract_estat : e-Stat API から CPI を取得し raw.cpi へ UPSERT
+  validate_load : 取り込み行数の契約を検証し、下流の dbt を守るゲート
+  dbt_*         : 同居する dbt プロジェクトを BashOperator で起動
 
 設計判断:
   - 冪等性: data_interval_start を渡し、同じ実行日で再実行しても重複しないこと
@@ -68,7 +67,7 @@ default_args = {
 
 with DAG(
     dag_id="jp_stats_elt",
-    description="e-Stat 政府統計 ELT パイプライン（CPI + 労働力調査）",
+    description="e-Stat 消費者物価指数の月次 ELT パイプライン",
     default_args=default_args,
     start_date=datetime(2026, 1, 1),
     schedule="@monthly",
