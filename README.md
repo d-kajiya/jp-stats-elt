@@ -11,7 +11,7 @@ while still demonstrating the engineering practices used in production data plat
 
 ---
 
-## Why this project / なぜこのプロジェクトか
+## Why this project
 
 Most "data engineering portfolio" repositories stop at a notebook or a single Python
 script. This one is deliberately scoped to show the parts that matter on the job:
@@ -21,14 +21,9 @@ script. This one is deliberately scoped to show the parts that matter on the job
 - **Testing in CI** — `dbt test` and Python unit tests run on every PR
 - **Reproducibility** — single `docker compose up` brings up the full stack
 
-公開されている「データエンジニアリング・ポートフォリオ」の多くは Notebook や単発
-スクリプトで止まりがちですが、このプロジェクトは現場で実際に問われる要素
-（オーケストレーション・冪等性・dbt の責務分離・CI でのテスト自動化）に
-意図的にフォーカスしています。
-
 ---
 
-## Architecture / アーキテクチャ
+## Architecture
 
 ```
 ┌─────────────┐    ┌──────────┐    ┌────────────────┐    ┌──────────┐
@@ -45,7 +40,7 @@ Detailed component diagram and data lineage: [`docs/architecture.md`](docs/archi
 
 ---
 
-## Data sources / データソース
+## Data sources
 
 | Source | What it is | Why I picked it |
 | --- | --- | --- |
@@ -136,7 +131,7 @@ opening group write access is enough, because the `airflow` user belongs to grou
 
 ---
 
-## Local development / ローカル開発環境
+## Local development
 
 Two Python environments coexist by design:
 
