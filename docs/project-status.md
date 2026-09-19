@@ -13,7 +13,7 @@
 | 1-2 | Repository scaffold, Docker Compose, minimal DAG | **Done** (stack healthy, DAG parses, pushed to GitHub) |
 | 3-4 | e-Stat extraction + idempotent load into `raw.*` | **Done** (statsDataId=0003427113, 28,330 rows loaded; wired into the DAG as PythonOperator) |
 | 5-6 | dbt staging / intermediate / marts + tests | **Done** (2 seeds, 7 models, 17 data tests; `dbt build` = 26 PASS) |
-| 7-8 | GitHub Actions CI, architecture docs, README polish | **In progress** (CI green: lint / pytest / dbt; docs pending) |
+| 7-8 | GitHub Actions CI, architecture docs, README polish | **Done** (CI green: lint / pytest / dbt; branch protection enforced; docs aligned with implementation) |
 ---
 
 ## Week 1-2 progress detail
@@ -181,6 +181,55 @@ CI postgres service. That was a Week 1-2 decision paying off six weeks later.
 
 ---
 
+## Week 8 progress detail
+
+### Branch protection and the PR workflow
+
+**Done**: `main` now requires all three CI checks (`Lint (ruff)`, `Test (pytest)`,
+`dbt (build)`) to pass before a merge, with `strict: true` so a stale green run
+cannot be merged after `main` moves. Direct pushes to `main` are rejected.
+
+**Why**: The CI added in Week 7 ran on every push, but nothing stopped a red commit
+from landing on `main` — the checks were informational. Requiring them turns the
+workflow into a gate. `enforce_admins` is left off deliberately: this is a
+single-maintainer repository, and locking myself out of my own `main` during an
+emergency has no upside.
+
+Set via `gh api -X PUT repos/.../branches/main/protection`. Note that the required
+check names must match the job `name:` values exactly — `Test (pytest)`, not
+`Tests (pytest)` — or the branch waits forever for a check that never reports.
+
+### Documentation corrected against the implementation
+
+Three claims in the repository described a project that does not exist:
+
+- The README's Data sources table listed the **Labour Force Survey** alongside CPI,
+  and the sentence below it treated both as ingested. Only CPI is. Moved to
+  Future improvements.
+- The README cited **incremental and pivot patterns** as the reason for choosing
+  CPI. The marts are table materialisations, and `int_cpi_pivoted` was dropped in
+  Week 5 once inspection showed every `cat01` code is flat (`@level=1`).
+- The DAG's module docstring still called the file a **Week 1-2 skeleton whose
+  tasks are echo placeholders** and listed Weeks 3-8 as upcoming work.
+
+**Why this matters more than it looks**: for a portfolio repository, the gap between
+what the documentation claims and what the code does is exactly what a technical
+reviewer probes. A stale docstring is worse than no docstring.
+
+The lineage diagram in `architecture.md` also carried a row count for `raw.cpi`
+(28,330). Removed rather than updated — the table grows with every run, so any
+number written there is wrong by the next one. Seed counts (48 areas, 10 categories)
+stay, because they describe the grain of the dataset rather than its current state.
+
+### Verified state at the close of Week 8
+
+| Check | Result |
+|---|---|
+| `dbt build` | 26 PASS / 0 WARN / 0 ERROR |
+| `raw.cpi` | 29,280 rows, 61 complete months (2021-07 through 2026-07) |
+| CI on PR | 3/3 green (lint 8s, pytest 1m4s, dbt 1m38s) |
+| Merged via PR | #1 (squash), #2 (rebase) |
+
 ## Key technical decisions
 
 These were settled in earlier discussions and should not be re-opened without explicit reason.
@@ -238,4 +287,4 @@ Notes for future reference and for portfolio talking points:
 - CPI is a city-based survey with no prefecture-level data. The area unit is nationwide + 47 prefectural capital cities. Fukuoka City = 40A02.
 ---
 
-**Last updated**: 2026-06-28 (Week 3, e-Stat extraction phase complete)
+**Last updated**: 2026-09-19 (Week 8, branch protection and documentation alignment complete)
