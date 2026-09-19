@@ -44,10 +44,9 @@ Detailed component diagram and data lineage: [`docs/architecture.md`](docs/archi
 
 | Source | What it is | Why I picked it |
 | --- | --- | --- |
-| **Consumer Price Index (CPI)** | Monthly index by item × region | Three-axis time-series suits dbt's incremental and pivot patterns |
-| **Labour Force Survey** | Monthly employment / unemployment figures | Joins with CPI to demonstrate multi-source integration |
+| **Consumer Price Index (CPI)** | Monthly index by item × region | A time × region × item grid exercises layered dbt models and year-over-year self-joins |
 
-Both are published by the Statistics Bureau of Japan and accessed via the official
+It is published by the Statistics Bureau of Japan and accessed via the official
 e-Stat REST API.
 
 ---
@@ -217,7 +216,7 @@ environments resolve to the same versions.
 - [x] **Week 1-2** — Repository scaffold, Docker Compose, minimal DAG
 - [x] **Week 3-4** — e-Stat extraction + idempotent load into `raw.*`
 - [x] **Week 5-6** — dbt staging / intermediate / marts + tests
-- [ ] **Week 7-8** — GitHub Actions CI (done), architecture docs, English README polish
+- [x] **Week 7-8** — GitHub Actions CI, architecture docs, English README, branch protection
 
 ### Future improvements (out of scope for the initial release)
 
@@ -225,6 +224,8 @@ environments resolve to the same versions.
   to expose dbt model dependencies as native Airflow tasks
 - Migrate the warehouse to DuckDB or Snowflake for partition-aware incremental builds
 - Add a Streamlit / Metabase dashboard layer on top of `marts`
+- Ingest a second e-Stat dataset (e.g. the Labour Force Survey) to demonstrate
+  multi-source integration in the intermediate layer
 
 ---
 
