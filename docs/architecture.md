@@ -54,7 +54,7 @@ are exercised on every push without depending on the local stack.
 
 ```mermaid
 flowchart TD
-    src[("raw.cpi<br/>28,330 rows")]
+    src[("raw.cpi")]
     seed1[/"area_master.csv<br/>48 rows"/]
     seed2[/"category_master.csv<br/>10 rows"/]
 
