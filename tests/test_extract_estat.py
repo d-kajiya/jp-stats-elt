@@ -1,10 +1,10 @@
-"""scripts/extract_estat.py の単体テスト。
+"""Unit tests for scripts/extract_estat.py.
 
-実 API・実 DB に依存しないことを原則とする:
-  - パーサ(parse_values)は純粋関数なので pandas のみで検証
-  - クライアント(_get_with_retry)は responses で HTTP をモック
-  - UPSERT は DB 接続を伴うため、psycopg2/DB が無い環境では skip
-Week 3 抽出フェーズのロジックを回帰テストで保護する。
+The principle is no dependency on the real API or a real database:
+  - The parser (parse_values) is a pure function, tested with pandas alone
+  - The client (_get_with_retry) is tested against HTTP mocked with `responses`
+  - The UPSERT needs a database, so it is skipped where psycopg2/the DB is absent
+These guard the extraction logic against regressions.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ import pytest
 import responses
 
 
-# --- parse_values: 正常系 ---
+# --- parse_values: happy path ---
 def test_parse_values_basic_shape():
     values = [
         {
@@ -39,7 +39,7 @@ def test_parse_values_basic_shape():
     ]
     df = e.parse_values(values)
 
-    # 列が raw.cpi のスキーマ順で揃っている
+    # Columns follow the raw.cpi schema order
     assert list(df.columns) == [
         "tab_code",
         "area_code",
@@ -50,15 +50,15 @@ def test_parse_values_basic_shape():
         "unit",
     ]
     assert len(df) == 2
-    # コード列が正しくマッピングされている
+    # Code columns are mapped correctly
     assert df.loc[0, "area_code"] == "13A01"
     assert df.loc[0, "category_code"] == "0002"
-    # 数値化されている（value_raw は原文保持）
+    # Values are numeric (value_raw keeps the original text)
     assert df.loc[0, "value"] == 128.2
     assert df.loc[0, "value_raw"] == "128.2"
 
 
-# --- parse_values: 欠損マーカー *** → value=NULL, value_raw=原文 ---
+# --- parse_values: missing marker *** -> value=NULL, value_raw=original ---
 def test_parse_values_missing_marker_becomes_null():
     values = [
         {
@@ -72,13 +72,13 @@ def test_parse_values_missing_marker_becomes_null():
     ]
     df = e.parse_values(values)
 
-    # value は数値化できず NaN（→ DB では NULL）
+    # value cannot be parsed, so NaN (-> NULL in the DB)
     assert math.isnan(df.loc[0, "value"])
-    # 原文 '***' は value_raw に温存される
+    # The original '***' is preserved in value_raw
     assert df.loc[0, "value_raw"] == "***"
 
 
-# --- parse_values: @unit キー欠如 → unit 列は NA ---
+# --- parse_values: missing @unit key -> unit column is NA ---
 def test_parse_values_missing_unit_key():
     values = [
         {
@@ -87,7 +87,7 @@ def test_parse_values_missing_unit_key():
             "@area": "13A01",
             "@time": "2026000505",
             "$": "128.2",
-        },  # @unit が無い（CPI の実形状）
+        },  # no @unit (the actual shape of CPI responses)
     ]
     df = e.parse_values(values)
 
@@ -95,14 +95,14 @@ def test_parse_values_missing_unit_key():
     assert pd.isna(df.loc[0, "unit"])
 
 
-# --- _get_with_retry: HTTP 502 が続いた後に成功（リトライが効く）---
+# --- _get_with_retry: succeeds after repeated HTTP 502 (retries work) ---
 @responses.activate
 def test_get_with_retry_recovers_after_502(monkeypatch):
-    # バックオフの sleep を潰して即時化
+    # Stub out the backoff sleep so the test runs instantly
     monkeypatch.setattr(e.time, "sleep", lambda *_: None)
 
     url = f"{e.ESTAT_BASE_URL}/getStatsData"
-    # 1回目・2回目は 502、3回目で正常 JSON
+    # 502 on the first and second calls, valid JSON on the third
     responses.add(responses.GET, url, status=502)
     responses.add(responses.GET, url, status=502)
     responses.add(
@@ -116,16 +116,16 @@ def test_get_with_retry_recovers_after_502(monkeypatch):
     body = e._get_with_retry(session, "getStatsData", {})
 
     assert body["GET_STATS_DATA"]["RESULT"]["STATUS"] == 0
-    assert len(responses.calls) == 3  # 2回リトライして3回目で成功
+    assert len(responses.calls) == 3  # two retries, success on the third call
 
 
-# --- _get_with_retry: 本文 STATUS=100（認証失敗）は即エラー（リトライしない）---
+# --- _get_with_retry: in-body STATUS=100 (auth failure) errors immediately (no retry) ---
 @responses.activate
 def test_get_with_retry_auth_error_is_not_retried(monkeypatch):
     monkeypatch.setattr(e.time, "sleep", lambda *_: None)
 
     url = f"{e.ESTAT_BASE_URL}/getStatsList"
-    # HTTP は 200 だが本文 STATUS=100（恒久的エラー）
+    # HTTP 200, but in-body STATUS=100 (a permanent error)
     responses.add(
         responses.GET,
         url,
@@ -137,13 +137,13 @@ def test_get_with_retry_auth_error_is_not_retried(monkeypatch):
     with pytest.raises(e.EStatError):
         e._get_with_retry(session, "getStatsList", {})
 
-    assert len(responses.calls) == 1  # リトライせず1回で諦める
+    assert len(responses.calls) == 1  # gives up after one call, without retrying
 
 
-# --- UPSERT: 冪等性の統合テスト（DB が無ければ skip）---
+# --- UPSERT: idempotency integration test (skipped without a DB) ---
 @pytest.fixture
 def warehouse_conn():
-    """warehouse へ接続。繋がらなければテストを skip し、終了時に閉じる。"""
+    """Connect to the warehouse; skip the test if unreachable, and close on teardown."""
     import os
 
     psycopg2 = pytest.importorskip("psycopg2")
@@ -157,14 +157,14 @@ def warehouse_conn():
             connect_timeout=3,
         )
     except psycopg2.OperationalError as exc:
-        pytest.skip(f"warehouse に接続できないため skip: {exc}")
+        pytest.skip(f"skipped: cannot connect to the warehouse: {exc}")
 
     yield conn
     conn.close()
 
 
 def _make_test_df():
-    """本番データと混ざらない隔離用 DataFrame（tab_code='TEST'）。"""
+    """An isolated DataFrame that never mixes with production data (tab_code='TEST')."""
     return pd.DataFrame(
         [
             {
@@ -204,30 +204,30 @@ def test_upsert_is_idempotent(warehouse_conn):
             return cur.fetchone()[0]
 
     try:
-        # 1回目: 2行挿入される
+        # First run: two rows are inserted
         e.upsert_cpi(df, conn=conn)
         assert count_test_rows() == 2
         first_load = max_loaded_at()
 
-        # 2回目: 同じキーなので行数は増えない（冪等）。loaded_at は進む
+        # Second run: same keys, so the row count does not grow (idempotent); loaded_at advances
         e.upsert_cpi(df, conn=conn)
-        assert count_test_rows() == 2, "再 UPSERT で行が重複してはいけない"
-        assert max_loaded_at() > first_load, "再ロードで loaded_at が更新されるべき"
+        assert count_test_rows() == 2, "re-UPSERT must not duplicate rows"
+        assert max_loaded_at() > first_load, "re-load should advance loaded_at"
 
-        # 値更新の確認: value を変えて UPSERT → 既存行が上書きされる
+        # Value update: UPSERT with a changed value overwrites the existing row
         df2 = df.copy()
         df2.loc[0, "value"] = 999.0
         df2.loc[0, "value_raw"] = "999.0"
         e.upsert_cpi(df2, conn=conn)
-        assert count_test_rows() == 2  # 依然 2 行
+        assert count_test_rows() == 2  # still two rows
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT value FROM raw.cpi "
                 "WHERE tab_code='TEST' AND category_code='0002' AND time_code='9999000101';"
             )
-            assert cur.fetchone()[0] == 999.0  # DO UPDATE で上書きされた
+            assert cur.fetchone()[0] == 999.0  # overwritten by DO UPDATE
     finally:
-        # 後始末: テスト行を必ず削除
+        # Cleanup: always delete the test rows
         with conn.cursor() as cur:
             cur.execute("DELETE FROM raw.cpi WHERE tab_code = 'TEST';")
         conn.commit()
