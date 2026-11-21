@@ -1,10 +1,11 @@
-# dbt 接続設定
+# dbt connection profile
 #
-# 認証情報はすべて環境変数経由で注入する（リポジトリにシークレットを残さない）。
-# docker-compose.yml で WAREHOUSE_* を Airflow コンテナに渡しているので、
-# Airflow の BashOperator から `dbt run` を呼ぶときに自動で解決される。
+# All credentials are injected through environment variables, so no secrets live in
+# the repository. docker-compose.yml passes WAREHOUSE_* into the Airflow container, so
+# they resolve automatically when the BashOperator runs `dbt run`. CI exports the same
+# variables to point this target at its postgres service.
 #
-# ローカルから直接 dbt を叩く場合は `.env` を source してから実行すること。
+# To run dbt directly from the host, source `.env` first.
 
 jp_stats_elt:
   target: dev
