@@ -1,9 +1,9 @@
-# dbt プロジェクト設定
+# dbt project configuration
 #
-# レイヤ構成:
-#  staging      → 1:1 で raw を整形（型・カラム名・NULL処理のみ）
-#  intermediate → 複数 staging の結合・分析対象の選別（完全月フィルタ）
-#  marts        → 分析利用に耐える最終形（ファクト/集計）
+# Layers:
+#  staging      → 1:1 cleanup of raw (types, column names and NULL handling only)
+#  intermediate → join staging models and select analysable periods (complete-month filter)
+#  marts        → analysis-ready facts and aggregates
 
 name: 'jp_stats_elt'
 version: '1.0.0'

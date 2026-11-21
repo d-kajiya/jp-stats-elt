@@ -19,9 +19,9 @@ jobs:
         with:
           python-version: "3.11"
 
-      # ruff のみをインストールする。lint に Airflow や pandas は不要で、
-      # 依存を丸ごと入れるとジョブが数分伸びる。
-      # バージョンは pyproject.toml のピンと一致させること。
+      # Install ruff alone. Linting needs neither Airflow nor pandas, and the full
+      # dependency set would add minutes to the job.
+      # Keep the version in sync with the pin in pyproject.toml.
       - name: Install ruff
         run: pip install "ruff==0.16.4"
 
@@ -42,18 +42,18 @@ jobs:
         with:
           python-version: "3.11"
 
-      # ランタイム依存は requirements.lock（Airflow constraints 準拠）から。
-      # テスト専用依存は pyproject.toml の dev extras から入れる。
-      # lock を先に入れているので、dev extras 側の無指定パッケージは
-      # 既存のインストール済みバージョンで要求が満たされ、上書きされない。
+      # Runtime dependencies come from requirements.lock (resolved against Airflow's
+      # constraints); test-only dependencies come from the dev extras in pyproject.toml.
+      # The lock is installed first, so unpinned packages in the dev extras are already
+      # satisfied by the installed versions and are not overwritten.
       - name: Install dependencies
         run: |
           pip install -r requirements.lock
           pip install ".[dev]"
           pip list | grep -Ei 'ruff|pytest|responses|apache-airflow |pandas'
 
-      # DB を用意しないため test_upsert_is_idempotent は skip される想定。
-      # -rs で skip の理由をログに出し、意図した skip か毎回確認できるようにする。
+      # No database is provided here, so test_upsert_is_idempotent is expected to skip.
+      # -rs prints the skip reason so each run shows the skip is the intended one.
       - name: Run pytest
         run: pytest -rs
 
@@ -61,16 +61,16 @@ jobs:
     name: dbt (build)
     runs-on: ubuntu-latest
 
-    # dbt は DB が無いと何も検証できないので、ジョブ専用の postgres を立てる。
-    # health-cmd が通るまで GitHub Actions がステップ開始を待ってくれる。
+    # dbt cannot verify anything without a database, so the job gets its own postgres.
+    # GitHub Actions waits for health-cmd to pass before starting the steps.
     services:
       postgres:
         image: postgres:15
         env:
           POSTGRES_USER: airflow
           POSTGRES_PASSWORD: airflow
-          # warehouse は init-warehouse.sql が CREATE DATABASE する。
-          # ここで作ってしまうと本番と同じ SQL が流せなくなる。
+          # init-warehouse.sql creates the warehouse database itself. Creating it here
+          # would stop CI from running the same SQL as the Docker stack.
           POSTGRES_DB: postgres
         ports:
           - 5432:5432
@@ -80,8 +80,8 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
-    # profiles.yml は全項目が env_var 経由なので、CI 用の target を足さずに
-    # 環境変数を渡すだけで dev target がこの postgres を指す。
+    # Every field in profiles.yml reads from env_var, so exporting these variables points
+    # the existing dev target at this postgres; no CI-specific target is needed.
     env:
       WAREHOUSE_HOST: localhost
       WAREHOUSE_PORT: "5432"
@@ -101,13 +101,13 @@ jobs:
       - name: Install dbt
         run: pip install -r requirements.lock
 
-      # 本番と同じ DDL を流す。CI 専用のスキーマ定義を書くと本番と乖離する。
+      # Run the same DDL as the Docker stack. A CI-only schema would drift from it.
       - name: Create warehouse schema
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/init-warehouse.sql
         env:
           DATABASE_URL: postgresql://airflow:airflow@localhost:5432/postgres
 
-      # extract の代わりに固定フィクスチャを流し込む。
+      # Load the committed fixture in place of a live extraction.
       - name: Load raw.cpi fixture
         run: |
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
