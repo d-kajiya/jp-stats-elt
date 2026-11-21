@@ -1,15 +1,16 @@
-# Airflow + PostgreSQL ローカル開発用 Docker Compose
+# Docker Compose for local development: Airflow + PostgreSQL
 #
-# 構成:
-#  - postgres: Airflow メタDB と Warehouse(分析用DB) を同居させる単一インスタンス
-#    （ポートフォリオ用にコスト最小化。本番では分離が望ましい旨を README に明記）
-#  - airflow-init: 初回のみ DB 初期化と admin ユーザー作成を行うワンショット
+# Services:
+#  - postgres: a single instance hosting both the Airflow metadata DB and the
+#    warehouse (analytical DB). Kept as one to minimise cost; in production the two
+#    would run on separate instances
+#  - airflow-init: one-shot job that initialises the DB and creates the admin user
 #  - airflow-webserver: Web UI (http://localhost:8080)
-#  - airflow-scheduler: DAG スケジューリング
+#  - airflow-scheduler: DAG scheduling
 #
-# 起動: docker compose up -d
-# 停止: docker compose down
-# 完全クリーン: docker compose down -v
+# Start:       docker compose up -d
+# Stop:        docker compose down
+# Full reset:  docker compose down -v
 
 x-airflow-common: &airflow-common
   build:
@@ -20,10 +21,10 @@ x-airflow-common: &airflow-common
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
     AIRFLOW__CORE__LOAD_EXAMPLES: ${AIRFLOW__CORE__LOAD_EXAMPLES:-False}
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: ${AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION:-True}
-    # DAG / scripts 側で利用
+    # Used by the DAG and scripts/
     ESTAT_APP_ID: ${ESTAT_APP_ID}
     WAREHOUSE_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${WAREHOUSE_DB}
-    # dbt が profiles.yml から参照
+    # Read by dbt via profiles.yml
     WAREHOUSE_HOST: postgres
     WAREHOUSE_PORT: 5432
     WAREHOUSE_USER: ${POSTGRES_USER}
@@ -49,7 +50,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      # 起動時に warehouse 用の論理DBを自動作成
+      # Create the warehouse logical DB on first start
       - ./scripts/init-warehouse.sql:/docker-entrypoint-initdb.d/init-warehouse.sql:ro
     ports:
       - "5432:5432"
