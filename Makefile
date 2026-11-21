@@ -1,16 +1,16 @@
-# jp-stats-elt 開発タスクのショートカット
+# Shortcuts for jp-stats-elt development tasks
 #
-# 使い方:
-#   make setup       # uv で .venv を作って依存をインストール
-#   make lint        # ruff によるリント
-#   make format      # ruff format によるフォーマット
-#   make test        # pytest 実行
-#   make up          # Docker スタック起動
-#   make down        # Docker スタック停止
-#   make clean       # 仮想環境とログを削除
+# Usage:
+#   make setup       # create .venv with uv and install dependencies
+#   make lint        # lint with ruff
+#   make format      # format with ruff format
+#   make test        # run pytest
+#   make up          # start the Docker stack
+#   make down        # stop the Docker stack
+#   make clean       # remove the virtualenv and logs
 #
-# Airflow の依存解決は constraints ファイルが必須。
-# Python と Airflow のバージョンは pyproject.toml / Dockerfile と一致させること。
+# Resolving Airflow's dependencies requires the official constraints file.
+# Keep the Python and Airflow versions in sync with pyproject.toml and the Dockerfile.
 
 AIRFLOW_VERSION := 2.9.3
 PYTHON_VERSION := 3.11
@@ -21,9 +21,9 @@ CONSTRAINT_URL := https://raw.githubusercontent.com/apache/airflow/constraints-$
 help:
 	@echo "Targets: setup | lint | format | test | up | down | logs | clean"
 
-# uv で仮想環境を作り、依存をインストール
-# このプロジェクトは「アプリケーション」であり配布パッケージではないため、
-# プロジェクト自体は editable install せず、依存ライブラリのみをインストールする。
+# Create a virtualenv with uv and install dependencies.
+# This project is an application, not a distributable package, so the project
+# itself is not editable-installed; only its dependencies are.
 setup:
 	uv venv
 	@if [ -f requirements.lock ]; then \
@@ -36,7 +36,7 @@ setup:
 	@echo ""
 	@echo "✓ Done. Activate with: source .venv/bin/activate"
 
-# 依存をロックファイルに固定（pyproject.toml を変更したら必ず実行してコミット）
+# Pin dependencies into the lock file (run and commit after every pyproject.toml change)
 lock:
 	uv pip compile pyproject.toml \
 		--constraint "$(CONSTRAINT_URL)" \
