@@ -28,15 +28,14 @@ script. This one is deliberately scoped to show the parts that matter on the job
 ```
 ┌─────────────┐    ┌──────────┐    ┌────────────────┐    ┌──────────┐
 │  e-Stat API │ →  │  Airflow │ →  │   PostgreSQL   │ ←  │   dbt    │
-│ (CPI/Labour)│    │  (ELT)   │    │ raw → marts    │    │ (models) │
+│    (CPI)    │    │  (ELT)   │    │ raw → marts    │    │ (models) │
 └─────────────┘    └──────────┘    └────────────────┘    └──────────┘
                                           ↑
                                  GitHub Actions CI
-                              (dbt test + pytest on PR)
+                              (ruff + pytest + dbt build)
 ```
 
 Detailed component diagram and data lineage: [`docs/architecture.md`](docs/architecture.md)
-*(populated in Week 7-8)*
 
 ---
 
@@ -58,7 +57,7 @@ e-Stat REST API.
 | Orchestration | Apache Airflow 2.9 (LocalExecutor) |
 | Storage | PostgreSQL 15 (single instance, separate logical DBs for metadata and warehouse) |
 | Transformation | dbt-core 1.8 + dbt-postgres |
-| Data quality | Great Expectations + dbt tests |
+| Data quality | dbt tests (grain, range, join integrity) + a row-count gate in the DAG; Great Expectations is installed in the image but not yet wired in (see [Trade-offs](docs/architecture.md#trade-offs)) |
 | CI | GitHub Actions |
 | Runtime | Docker Compose |
 
