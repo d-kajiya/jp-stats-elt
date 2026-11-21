@@ -1,17 +1,23 @@
 """
-jp-stats-elt: e-Stat の消費者物価指数を取り込み、dbt で変換する月次 ELT DAG。
+jp-stats-elt: monthly ELT DAG that ingests the Consumer Price Index from e-Stat
+and transforms it with dbt.
 
-タスク構成:
+Task flow:
   start → extract_estat → validate_load → dbt_deps → dbt_seed → dbt_run → dbt_test → end
 
-  extract_estat : e-Stat API から CPI を取得し raw.cpi へ UPSERT
-  validate_load : 取り込み行数の契約を検証し、下流の dbt を守るゲート
-  dbt_*         : 同居する dbt プロジェクトを BashOperator で起動
+  extract_estat : fetch CPI from the e-Stat API and UPSERT it into raw.cpi
+  validate_load : row-count contract gate that protects the downstream dbt run
+  dbt_*         : invoke the co-located dbt project through BashOperator
 
-設計判断:
-  - 冪等性: data_interval_start を渡し、同じ実行日で再実行しても重複しないこと
-  - リトライ: API・DB の一時障害を吸収するため retries=2
-  - schedule: e-Stat の月次更新に合わせ '@monthly'（毎月1日）
+Design decisions:
+  - Idempotency: raw.cpi is keyed on e-Stat's own identifiers
+    (tab_code, area_code, category_code, time_code) and loaded with
+    ON CONFLICT DO UPDATE. The extraction window is a rolling 60 months
+    resolved at runtime, so the logical date is deliberately not passed in;
+    a re-run, a backfill and a scheduled run all converge on the same state.
+  - Retries: retries=2 with a 5-minute delay absorbs outages longer than the
+    in-client exponential backoff (see docs/architecture.md).
+  - Schedule: '@monthly' (1st of each month) to match e-Stat's monthly release.
 """
 
 from __future__ import annotations
@@ -26,23 +32,23 @@ from airflow.operators.python import PythonOperator
 
 from airflow import DAG
 
-# scripts/ をコンテナ内 import パスに追加（/opt/airflow/scripts にマウント済み）
+# Make scripts/ importable inside the container (mounted at /opt/airflow/scripts)
 sys.path.append("/opt/airflow/scripts")
 
 DBT_PROJECT_DIR = "/opt/airflow/dbt"
 
 
 def _run_extract() -> int:
-    """e-Stat から CPI を取得し raw.cpi へ冪等ロード。ロード行数を返す。"""
+    """Fetch CPI from e-Stat and load it idempotently into raw.cpi. Returns rows loaded."""
     import extract_estat
 
     return extract_estat.main()
 
 
 def _validate_load(min_rows: int = 20_000) -> None:
-    """raw.cpi の行数がしきい値以上かを検証するデータ契約ゲート。
+    """Data-contract gate: assert raw.cpi holds at least ``min_rows`` rows.
 
-    tab_code='TEST' のテスト行は除外して本番相当のみ数える。
+    Rows with tab_code='TEST' are excluded so that only production data is counted.
     """
     import extract_estat
 
@@ -52,8 +58,8 @@ def _validate_load(min_rows: int = 20_000) -> None:
             (rows,) = cur.fetchone()
 
     if rows < min_rows:
-        raise ValueError(f"raw.cpi の行数が想定を下回っています: {rows} < {min_rows}")
-    logging.info("validate_load OK: raw.cpi に %d 行", rows)
+        raise ValueError(f"raw.cpi has fewer rows than expected: {rows} < {min_rows}")
+    logging.info("validate_load OK: raw.cpi holds %d rows", rows)
 
 
 default_args = {
@@ -67,7 +73,7 @@ default_args = {
 
 with DAG(
     dag_id="jp_stats_elt",
-    description="e-Stat 消費者物価指数の月次 ELT パイプライン",
+    description="Monthly ELT pipeline for the e-Stat Consumer Price Index",
     default_args=default_args,
     start_date=datetime(2026, 1, 1),
     schedule="@monthly",
@@ -77,36 +83,36 @@ with DAG(
 ) as dag:
     start = EmptyOperator(task_id="start")
 
-    # Week 4: e-Stat API から CPI を取得し raw.cpi へ冪等ロード
+    # Fetch CPI from the e-Stat API and load it idempotently into raw.cpi
     extract = PythonOperator(
         task_id="extract_estat",
         python_callable=_run_extract,
     )
 
-    # Week 4: raw.cpi の行数を検証するデータ契約ゲート（dbt が読む前段）
+    # Row-count contract gate on raw.cpi, ahead of anything dbt reads
     load = PythonOperator(
         task_id="validate_load",
         python_callable=_validate_load,
     )
 
-    # Week 6: dbt パッケージ（dbt_utils）を取得。marts のテストが依存するため、
-    # クリーンな環境でも自己完結するようパイプラインに組み込む。冪等かつ高速
+    # Install dbt packages (dbt_utils). The marts tests depend on it, so it is part
+    # of the pipeline to keep a clean environment self-contained. Idempotent and fast
     dbt_deps = BashOperator(
         task_id="dbt_deps",
         bash_command=f"cd {DBT_PROJECT_DIR} && dbt deps --profiles-dir {DBT_PROJECT_DIR}",
     )
-    # Week 5: area_master seed をロード（stg_area_master が ref する）
+    # Load the area_master and category_master seeds referenced by staging
     dbt_seed = BashOperator(
         task_id="dbt_seed",
         bash_command=f"cd {DBT_PROJECT_DIR} && dbt seed --profiles-dir {DBT_PROJECT_DIR}",
     )
-    # Week 5: staging モデルを構築（失敗はタスク失敗として扱う）
+    # Build all models: staging → intermediate → marts (a dbt failure fails the task)
     dbt_run = BashOperator(
         task_id="dbt_run",
         bash_command=f"cd {DBT_PROJECT_DIR} && dbt run --profiles-dir {DBT_PROJECT_DIR}",
     )
 
-    # Week 5: source/seed/model の全テストを実行（失敗はタスク失敗）
+    # Run every source, seed and model test (a dbt failure fails the task)
     dbt_test = BashOperator(
         task_id="dbt_test",
         bash_command=f"cd {DBT_PROJECT_DIR} && dbt test --profiles-dir {DBT_PROJECT_DIR}",
