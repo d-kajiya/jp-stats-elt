@@ -1,8 +1,9 @@
-"""DAGがImportErrorなく読み込めることを検証する最小スモークテスト。
+"""Structural tests for the jp_stats_elt DAG.
 
-Week 1-2 時点ではタスクの中身は echo プレースホルダなので、
-ここでは「DAGが構文エラーなくパースされる」「想定タスクが揃っている」
-ことだけを確認する。Week 3 以降、抽出ロジック本体のテストを追加していく。
+These run without a database or the e-Stat API. They check that the DAG parses
+without import errors, that its task set and ordering are exactly as designed, and
+that regressions fixed earlier (BashOperator extraction, `|| echo` fallbacks) cannot
+return unnoticed. The extraction logic itself is tested in test_extract_estat.py.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ import pytest
 
 @pytest.fixture(scope="module")
 def dagbag():
-    # Airflow がインストールされていない CI ステージではスキップ
+    # Skip in environments where Airflow is not installed
     pytest.importorskip("airflow")
     from airflow.models import DagBag
 
@@ -42,12 +43,12 @@ def test_expected_tasks_exist(dagbag):
         "dbt_test",
         "end",
     }
-    # issubset ではなく等価比較。タスクの追加も削除も検知したいため
+    # Equality rather than issubset, so that both added and removed tasks are caught
     assert set(dag.task_ids) == expected
 
 
 def test_extract_and_validate_are_python_operators(dagbag):
-    """Week 4: extract/validate は PythonOperator であること（Bash 逆戻り防止）。"""
+    """extract/validate must be PythonOperators (guards against reverting to Bash)."""
     from airflow.operators.python import PythonOperator
 
     dag = dagbag.dags["jp_stats_elt"]
@@ -56,10 +57,10 @@ def test_extract_and_validate_are_python_operators(dagbag):
 
 
 def test_dbt_task_ordering(dagbag):
-    """Week 5-6: deps -> seed -> run -> test の依存順を固定。
+    """Fix the dbt order: deps -> seed -> run -> test.
 
-    deps は dbt_utils を取得する。marts のテストが依存するため、
-    クリーンな環境では seed より前に走っていないと run/test が落ちる。
+    deps installs dbt_utils, which the marts tests depend on. In a clean environment,
+    run/test fail unless deps has run before seed.
     """
     dag = dagbag.dags["jp_stats_elt"]
 
@@ -73,8 +74,9 @@ def test_dbt_task_ordering(dagbag):
 
 
 def test_dbt_tasks_have_no_echo_fallback(dagbag):
-    """Week 5: dbt タスクが `|| echo` で失敗を握り潰していないこと。
-    握り潰しを再導入すると dbt の失敗がタスク成功に化けるため、回帰を防ぐ。
+    """dbt tasks must not swallow failures with `|| echo`.
+
+    Reintroducing that fallback would turn a dbt failure into a task success.
     """
     dag = dagbag.dags["jp_stats_elt"]
     for task_id in ("dbt_deps", "dbt_seed", "dbt_run", "dbt_test"):
